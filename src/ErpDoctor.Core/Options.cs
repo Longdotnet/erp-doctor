@@ -7,6 +7,7 @@ public sealed class ErpDoctorOptions
     public SqlServerOptions SqlServer { get; init; } = new();
     public HttpOptions Http { get; init; } = new();
     public IisOptions Iis { get; init; } = new();
+    public WindowsEventLogOptions WindowsEventLog { get; init; } = new();
     public SystemOptions System { get; init; } = new();
 
     public static ErpDoctorOptions Load(string? path)
@@ -47,6 +48,7 @@ public sealed class ErpDoctorOptions
                     .ToArray()
             },
             Iis = Iis,
+            WindowsEventLog = WindowsEventLog,
             System = System
         };
     }
@@ -89,6 +91,22 @@ public sealed record IisSiteOptions
     public string Name { get; init; } = "IIS site";
     public IReadOnlyList<string> ExpectedBindings { get; init; } = Array.Empty<string>();
     public bool CheckPhysicalPath { get; init; } = true;
+}
+
+public sealed record WindowsEventLogOptions
+{
+    public IReadOnlyList<WindowsEventLogQueryOptions> Queries { get; init; } =
+        Array.Empty<WindowsEventLogQueryOptions>();
+}
+
+public sealed record WindowsEventLogQueryOptions
+{
+    public string Name { get; init; } = "Recent Windows errors";
+    public string LogName { get; init; } = "Application";
+    public int LookbackMinutes { get; init; } = 60;
+    public int MaxEvents { get; init; } = 20;
+    public bool IncludeWarnings { get; init; }
+    public IReadOnlyList<string> Providers { get; init; } = Array.Empty<string>();
 }
 
 public sealed record SystemOptions
