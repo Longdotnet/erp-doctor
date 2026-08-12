@@ -165,7 +165,10 @@ public sealed class TcpConnectivityCheck(NetworkTargetOptions target) : IDiagnos
             var evidence = BuildEvidence(stopwatch.ElapsedMilliseconds);
             if (client.Client.RemoteEndPoint is IPEndPoint remote)
             {
-                evidence["remoteAddress"] = remote.Address.ToString();
+                var address = remote.Address.IsIPv4MappedToIPv6
+                    ? remote.Address.MapToIPv4()
+                    : remote.Address;
+                evidence["remoteAddress"] = address.ToString();
             }
 
             return new DiagnosticResult(
