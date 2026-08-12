@@ -1,0 +1,31 @@
+{
+  "sqlServer": {
+    "connectionString": "${ERP_DB}",
+    "databaseSizeWarningGb": 20,
+    "logSizeWarningGb": 5,
+    "blockingWarningSeconds": 10,
+    "longRunningWarningSeconds": 30,
+    "largestTablesLimit": 10
+  },
+  "http": {
+    "endpoints": [
+      {
+        "name": "ERP API",
+        "url": "https://localhost:5001/health",
+        "expectedStatusCode": 200,
+        "timeoutSeconds": 10,
+        "latencyWarningMs": 1500
+      }
+    ]
+  },
+  "iis": {
+    "appPools": [
+      "ErpApi"
+    ]
+  },
+  "system": {
+    "diskWarningFreePercent": 15,
+    "diskCriticalFreePercent": 5,
+    "memoryWarningAvailablePercent": 15
+  }
+}
