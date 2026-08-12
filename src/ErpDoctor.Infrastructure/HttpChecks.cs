@@ -92,7 +92,7 @@ public sealed class HttpEndpointCheck(HttpEndpointOptions endpoint) : IDiagnosti
     }
 
     private static string Normalize(string value) =>
-        new(value.ToLowerInvariant()
+        new string(value.ToLowerInvariant()
             .Select(ch => char.IsLetterOrDigit(ch) ? ch : '-')
             .ToArray())
             .Trim('-');

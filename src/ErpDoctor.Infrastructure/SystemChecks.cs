@@ -50,7 +50,7 @@ public sealed class DiskSpaceCheck(DriveInfo drive) : IDiagnosticCheck
     }
 
     private static string NormalizeDriveId(string value) =>
-        new(value.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+        new string(value.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
 
     private static string FormatBytes(long value)
     {
