@@ -11,7 +11,7 @@ on:
       version:
         description: "SemVer used for a packaging dry run (no release is created)"
         required: true
-        default: "0.12.0-dev.1"
+        default: "0.13.0-dev.1"
 
 permissions:
   contents: write
@@ -41,7 +41,7 @@ jobs:
           elif [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
             VERSION="$INPUT_VERSION"
           else
-            VERSION="0.12.0-dev.${GITHUB_RUN_NUMBER}"
+            VERSION="0.13.0-dev.${GITHUB_RUN_NUMBER}"
           fi
 
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
@@ -148,6 +148,19 @@ jobs:
           cp samples/nginx-plugin.example.json artifacts/nginx-plugin/nginx-plugin.example.json
           cp LICENSE artifacts/nginx-plugin/LICENSE
 
+      - name: Publish Redis plugin bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet publish plugins/ErpDoctor.Plugin.Redis/ErpDoctor.Plugin.Redis.csproj \
+            --configuration Release \
+            --output artifacts/redis-plugin \
+            -p:Version="$VERSION"
+
+          cp docs/redis-plugin.md artifacts/redis-plugin/README.md
+          cp samples/redis-plugin.example.json artifacts/redis-plugin/redis-plugin.example.json
+          cp LICENSE artifacts/redis-plugin/LICENSE
+
       - name: Smoke test standalone Linux build and plugin loading
         shell: bash
         run: |
@@ -162,7 +175,8 @@ jobs:
               "assemblies": [
                 "$GITHUB_WORKSPACE/artifacts/postgres-plugin/ErpDoctor.Plugin.Postgres.dll",
                 "$GITHUB_WORKSPACE/artifacts/docker-plugin/ErpDoctor.Plugin.Docker.dll",
-                "$GITHUB_WORKSPACE/artifacts/nginx-plugin/ErpDoctor.Plugin.Nginx.dll"
+                "$GITHUB_WORKSPACE/artifacts/nginx-plugin/ErpDoctor.Plugin.Nginx.dll",
+                "$GITHUB_WORKSPACE/artifacts/redis-plugin/ErpDoctor.Plugin.Redis.dll"
               ],
               "settings": {}
             }
@@ -177,6 +191,9 @@ jobs:
           grep -F "checks   : 3" <<< "$PLUGIN_OUTPUT"
           grep -F "nginx" <<< "$PLUGIN_OUTPUT"
           grep -F "Linux / Nginx Diagnostics" <<< "$PLUGIN_OUTPUT"
+          grep -F "redis" <<< "$PLUGIN_OUTPUT"
+          grep -F "Redis Diagnostics" <<< "$PLUGIN_OUTPUT"
+          grep -F "checks   : 5" <<< "$PLUGIN_OUTPUT"
 
       - name: Build release archives and checksums
         shell: bash
@@ -212,6 +229,11 @@ jobs:
             zip -q -r ../release/erp-doctor-plugin-nginx.zip .
           )
 
+          (
+            cd artifacts/redis-plugin
+            zip -q -r ../release/erp-doctor-plugin-redis.zip .
+          )
+
           cp artifacts/nuget/*.nupkg artifacts/release/
 
           (
@@ -222,6 +244,7 @@ jobs:
               erp-doctor-plugin-postgres.zip \
               erp-doctor-plugin-docker.zip \
               erp-doctor-plugin-nginx.zip \
+              erp-doctor-plugin-redis.zip \
               *.nupkg > checksums.txt
           )
 

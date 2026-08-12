@@ -6,13 +6,13 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4.svg)](https://dotnet.microsoft.com/)
 
-ERP Doctor is an open-source, evidence-first diagnostic CLI for the infrastructure small ERP teams end up owning all at once: **Windows, Linux, IIS, Nginx, .NET APIs, SQL Server, PostgreSQL, Docker, HTTP endpoints, Event Log, disks, memory, and environment configuration**.
+ERP Doctor is an open-source, evidence-first diagnostic CLI for the infrastructure small ERP teams end up owning all at once: **Windows, Linux, IIS, Nginx, .NET APIs, SQL Server, PostgreSQL, Redis, Docker, HTTP endpoints, Event Log, disks, memory, and environment configuration**.
 
 ```text
 CHECK -> COLLECT EVIDENCE -> CORRELATE -> DIAGNOSE -> RECOMMEND
 ```
 
-Instead of opening SSMS, IIS Manager, Event Viewer, Task Manager, Docker/Linux tooling, and a browser one by one:
+Instead of opening SSMS, IIS Manager, Event Viewer, Task Manager, Docker/Linux tooling, database consoles, and a browser one by one:
 
 ```bash
 erp-doctor check
@@ -20,7 +20,7 @@ erp-doctor check
 
 ## Why ERP Doctor?
 
-An endpoint can tell you an API is down. It usually cannot tell you whether the real issue is a stopped AppPool, Linux load pressure, invalid Nginx config, disk pressure, SQL blocking, an unhealthy container, config drift, or a failed .NET startup.
+An endpoint can tell you an API is down. It usually cannot tell you whether the real issue is a stopped AppPool, Linux load pressure, invalid Nginx config, disk pressure, SQL blocking, Redis memory pressure, an unhealthy container, config drift, or a failed .NET startup.
 
 ERP Doctor keeps those signals in one run so support/developers can reason about the **whole system**, not one component at a time.
 
@@ -32,6 +32,7 @@ ERP Doctor keeps those signals in one run so support/developers can reason about
 | SQL Server | Connectivity, data/log size, largest tables, blocking, long-running requests |
 | SQL growth | Local historical snapshots, size deltas, MB/day, table/row growth |
 | PostgreSQL plugin | Connectivity, database size, long-running queries, blocking sessions |
+| Redis plugin | Connectivity, server metadata, memory pressure, persistence, replication health |
 | Docker plugin | Engine reachability/version, engine summary, container state/health, expected containers |
 | Linux/Nginx plugin | Linux uptime/load/memory snapshot, Nginx version, config validation |
 | IIS | AppPool state, site state, bindings, root physical path |
@@ -79,6 +80,7 @@ erp-doctor-linux-x64.tar.gz
 erp-doctor-plugin-postgres.zip
 erp-doctor-plugin-docker.zip
 erp-doctor-plugin-nginx.zip
+erp-doctor-plugin-redis.zip
 ErpDoctor.Tool.<version>.nupkg
 ErpDoctor.PluginSdk.<version>.nupkg
 checksums.txt
@@ -135,18 +137,13 @@ Later snapshots can show data/log/total deltas, MB/day rate, and table/row growt
 
 See [`docs/database-growth.md`](docs/database-growth.md).
 
-## PostgreSQL provider
+## Provider plugins
 
-`ErpDoctor.Plugin.Postgres` contributes:
+Provider dependencies stay outside Core and are loaded only from explicit local DLL paths.
 
-```text
-plugin.postgres.connectivity
-plugin.postgres.database-size
-plugin.postgres.long-running
-plugin.postgres.blocking
-```
+### PostgreSQL
 
-The connection string is read from an environment variable; SQL text from `pg_stat_activity` is deliberately excluded from evidence. The provider never calls `pg_terminate_backend` or `pg_cancel_backend`.
+`ErpDoctor.Plugin.Postgres` contributes connectivity, database-size, long-running-query, and blocking checks. The connection string comes from an environment variable; SQL text from `pg_stat_activity` is excluded from evidence. The provider never terminates/cancels backends.
 
 ```bash
 erp-doctor plugin --config samples/postgres-plugin.example.json
@@ -154,17 +151,43 @@ erp-doctor plugin --config samples/postgres-plugin.example.json
 
 See [`docs/postgres-plugin.md`](docs/postgres-plugin.md).
 
-## Docker provider
+### Redis (v0.13)
 
-`ErpDoctor.Plugin.Docker` contributes:
+`ErpDoctor.Plugin.Redis` contributes:
 
 ```text
-plugin.docker.engine
-plugin.docker.info
-plugin.docker.containers
+plugin.redis.connectivity
+plugin.redis.server
+plugin.redis.memory
+plugin.redis.persistence
+plugin.redis.replication
 ```
 
-It uses fixed Docker CLI argument lists without invoking a shell and never starts/stops/restarts/removes containers. Container evidence is limited to **name/state/health**; env vars, labels, command, mounts, and raw stderr are excluded.
+It uses `redis-cli` with fixed argument lists and only executes `PING` plus selected `INFO` sections. It does **not** inspect keys/values or run `KEYS`, `SCAN`, `GET`, `CONFIG`, `MONITOR`, or other data/config discovery commands.
+
+Passwords stay out of JSON and process arguments. Configure only the environment-variable name:
+
+```powershell
+$env:ERP_DOCTOR_REDIS_PASSWORD="your-secret"
+```
+
+```json
+{
+  "passwordEnvironmentVariable": "ERP_DOCTOR_REDIS_PASSWORD"
+}
+```
+
+The child `redis-cli` process receives the secret through `REDISCLI_AUTH`; raw stderr and authentication material are excluded from diagnostic evidence. Redis memory, persistence, and replica-link/lag conditions are evaluated without exposing keyspace data or individual replica addresses.
+
+```bash
+erp-doctor plugin --config samples/redis-plugin.example.json
+```
+
+See [`docs/redis-plugin.md`](docs/redis-plugin.md).
+
+### Docker
+
+`ErpDoctor.Plugin.Docker` uses fixed Docker CLI arguments without invoking a shell and never starts/stops/restarts/removes containers. Container evidence is limited to **name/state/health**; env vars, labels, commands, mounts, and raw stderr are excluded.
 
 ```bash
 erp-doctor plugin --config samples/docker-plugin.example.json
@@ -172,27 +195,9 @@ erp-doctor plugin --config samples/docker-plugin.example.json
 
 See [`docs/docker-plugin.md`](docs/docker-plugin.md).
 
-## Linux / Nginx provider (v0.12)
+### Linux / Nginx
 
-`ErpDoctor.Plugin.Nginx` contributes:
-
-```text
-plugin.nginx.linux-runtime
-plugin.nginx.version
-plugin.nginx.config
-```
-
-Linux runtime evidence is read from `/etc/os-release` and `/proc` only. It reports distro/version, uptime, 1/5/15-minute load, load-per-CPU, and available-memory percentage when available.
-
-Nginx inspection is intentionally narrow:
-
-```text
-nginx -v
-nginx -t -q
-nginx -t -q -c <configured-path>
-```
-
-The provider never runs `nginx -T` and never sends `reload`, `stop`, `quit`, or `reopen` signals. Failed config tests expose only bounded status/path evidence; raw stderr is suppressed.
+`ErpDoctor.Plugin.Nginx` reads Linux runtime evidence from `/etc/os-release` and `/proc`, then uses only bounded Nginx version/config validation commands. It never dumps the full Nginx config and never reloads/stops Nginx.
 
 ```bash
 erp-doctor plugin --config samples/nginx-plugin.example.json
@@ -252,7 +257,7 @@ Every release runs restore → build → test → package. Dry runs additionally
 
 - self-contained Windows/Linux publish,
 - standalone Linux `--help`,
-- standalone loading of PostgreSQL (4), Docker (3), and Nginx (3) provider checks,
+- standalone loading of PostgreSQL (4), Docker (3), Nginx (3), and Redis (5) checks,
 - provider archive creation,
 - SHA256 verification.
 
@@ -268,8 +273,8 @@ Branch/manual dry runs cannot create a GitHub Release or publish NuGet; publishi
        Built-in checks                    PluginHost
              |                                 |
  System / SQL / HTTP / IIS / EventLog      PluginSdk DLLs
-             |                     /          |         |        \
-             |                Sample     PostgreSQL   Docker    Nginx
+             |                 /        /        |        |        \
+             |            Sample   PostgreSQL  Redis    Docker    Nginx
              +----------------+----------------+
                               |
                        DiagnosticRunner
@@ -294,10 +299,11 @@ Current built-in/provider diagnostics follow these principles:
 5. SQL growth history writes local state only.
 6. Config drift never prints/hashes sensitive values.
 7. PostgreSQL provider never terminates/cancels backends.
-8. Docker provider never changes container/engine state.
-9. Nginx provider never reloads/stops Nginx or dumps the full config.
-10. Permission/CLI failures become diagnostics instead of privilege escalation.
-11. Third-party plugins remain a separate executable-code trust boundary.
+8. Redis provider never reads keys/values or changes Redis state/topology.
+9. Docker provider never changes container/engine state.
+10. Nginx provider never reloads/stops Nginx or dumps the full config.
+11. Permission/CLI failures become diagnostics instead of privilege escalation.
+12. Third-party plugins remain a separate executable-code trust boundary.
 
 ## Roadmap
 
@@ -315,12 +321,14 @@ Completed:
 - [x] v0.10 release automation + package/single-file validation
 - [x] v0.11 Docker provider
 - [x] v0.12 Linux/Nginx provider
+- [x] v0.13 Redis provider
 
 Next:
 
-- [ ] Redis/RabbitMQ providers
+- [ ] RabbitMQ provider
 - [ ] Broader cross-platform system diagnostics
 - [ ] Installer UX based on release feedback
+- [ ] Optional machine-readable integration/MCP surface after provider feedback
 
 ## Contributing
 
