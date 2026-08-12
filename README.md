@@ -16,7 +16,7 @@ Instead of opening SSMS, IIS Manager, Event Viewer, Task Manager, and a browser 
 erp-doctor check
 ```
 
-## What v0.3 checks
+## What v0.4 checks
 
 - Fixed-disk free space
 - System memory
@@ -30,8 +30,9 @@ erp-doctor check
 - IIS application-pool state
 - Cross-check correlation for likely root causes
 - Sanitized support-bundle export for support handoff
+- SQL database/table growth compared with a local historical baseline
 
-ERP Doctor is intentionally **read-only**. It does not kill SQL sessions, shrink databases, restart IIS, delete logs, or update ERP data.
+ERP Doctor is intentionally **read-only toward your ERP stack**. It does not kill SQL sessions, shrink databases, restart IIS, delete logs, or update ERP data. Features such as `growth` may write ERP Doctor's own local state files.
 
 ## Example
 
@@ -163,6 +164,41 @@ ERP Doctor sanitizes secret-like evidence **before** JSON serialization and HTML
 
 See [`docs/support-bundle.md`](docs/support-bundle.md) for the sanitization boundary and file contract.
 
+## Database growth history
+
+A one-time database size cannot tell you what caused a database to jump from 8 GB to 20 GB. Capture a local baseline instead:
+
+```bash
+dotnet run --project src/ErpDoctor.Cli -- growth --config erp-doctor.json
+```
+
+The first run creates `erp-doctor-growth.json`. Later runs compare against the most recent snapshot for the same server/database and show data/log/total deltas, an MB/day rate when meaningful, and table-size/row-count changes.
+
+```text
+ERP Doctor - Database Growth
+────────────────────────────────────────────────────────────────────────
+Database : SQL01/ERP_PROD
+Current  : 19.80 GB total (14.70 GB data, 5.10 GB log)
+Since    : 2026-08-05 03:00:00 UTC (7.0 days)
+Data     : +3210.0 MB
+Log      : +540.0 MB
+Total    : +3750.0 MB
+Rate     : +535.7 MB/day
+
+Table growth
+────────────────────────────────────────────────────────────────────────
+  [dbo].[AuditLog]                      +2840.0 MB  rows   +4,821,093
+  [dbo].[AttendanceDetail]               +610.0 MB  rows     +931,501
+```
+
+Choose a separate history file per environment/customer when useful:
+
+```bash
+erp-doctor growth --config customer-a.json --history history/customer-a.json
+```
+
+The history file stores size metadata only; the SQL connection string is not persisted. ERP Doctor does not create any SQL history table, trigger, stored procedure, or Agent job. See [`docs/database-growth.md`](docs/database-growth.md).
+
 ## Configuration
 
 See [`samples/erp-doctor.example.json`](samples/erp-doctor.example.json).
@@ -172,7 +208,8 @@ See [`samples/erp-doctor.example.json`](samples/erp-doctor.example.json).
   "sqlServer": {
     "connectionString": "${ERP_DB}",
     "blockingWarningSeconds": 10,
-    "longRunningWarningSeconds": 30
+    "longRunningWarningSeconds": 30,
+    "growthTablesLimit": 50
   },
   "http": {
     "endpoints": [
@@ -195,29 +232,29 @@ See [`samples/erp-doctor.example.json`](samples/erp-doctor.example.json).
 ```text
                     ErpDoctor.Cli
                          |
-                    DiagnosticRunner
-                         |
-        +----------------+----------------+
-        |                |                |
-      System           SQL Server       HTTP/IIS
-        |                |                |
-        +----------------+----------------+
-                         |
-                  DiagnosticResult
-                         |
-                   DiagnosisEngine
-                         |
-                  DiagnosticReport
-                         |
-          +--------------+----------------------+
-          |              |                      |
-       Console          JSON            ErpDoctor.Reporting
-                                             |       |
-                                            HTML   Sanitizer
-                                                     |
-                                               Support Bundle
-                                                     |
-                                      report.json / report.html / manifest.json
+             +-----------+-----------+
+             |                       |
+      DiagnosticRunner           growth
+             |                       |
+   +---------+---------+       SQL read-only snapshot
+   |         |         |              |
+ System   SQL Server HTTP/IIS    local JSON history
+   |         |         |              |
+   +---------+---------+         delta analyzer
+             |
+      DiagnosticResult
+             |
+       DiagnosisEngine
+             |
+      DiagnosticReport
+             |
+   +---------+----------------------+
+   |         |                      |
+ Console    JSON            ErpDoctor.Reporting
+                                  |       |
+                                 HTML   Sanitizer
+                                          |
+                                    Support Bundle
 ```
 
 Every diagnostic implements the small `IDiagnosticCheck` contract. The core does not know about SQL Server, IIS, or HTTP, so future providers can be added without turning the CLI into one giant script.
@@ -228,6 +265,7 @@ Every diagnostic implements the small `IDiagnosticCheck` contract. The core does
 erp-doctor check
 erp-doctor report
 erp-doctor bundle
+erp-doctor growth
 erp-doctor system
 erp-doctor sql
 erp-doctor http
@@ -241,6 +279,7 @@ Common options:
 --json <path>     Export the stable diagnostic report as JSON
 --html <path>     Export a standalone HTML diagnostic report
 --bundle <path>   Export a sanitized support ZIP
+--history <path>  Local JSON state used by database growth history
 --help            Show help
 ```
 
@@ -248,16 +287,17 @@ Common options:
 
 Production support tools should be boring and predictable.
 
-ERP Doctor v0.3 follows these rules:
+ERP Doctor v0.4 follows these rules:
 
-1. Diagnostics are read-only.
+1. Diagnostics and growth queries are read-only toward the ERP/database.
 2. No automatic database repair or shrink.
 3. No automatic SQL session kill.
 4. No automatic IIS restart.
 5. Configuration supports environment-variable secrets.
 6. Support bundles sanitize secret-like report data before writing output.
 7. The source configuration file is not included in support bundles.
-8. A diagnosis is presented as evidence-backed guidance, not absolute certainty.
+8. Growth history is ERP Doctor local state and never creates objects in SQL Server.
+9. A diagnosis is presented as evidence-backed guidance, not absolute certainty.
 
 Some SQL dynamic management views require additional SQL Server permissions. If a check cannot run, ERP Doctor reports the check as an error instead of attempting privilege escalation.
 
@@ -288,8 +328,15 @@ Some SQL dynamic management views require additional SQL Server permissions. If 
 - [x] Secret-like evidence redaction
 - [x] Support-bundle regression tests
 
+### v0.4
+- [x] `erp-doctor growth` command
+- [x] Local versioned database-size history
+- [x] Data/log/total growth deltas and MB/day rate
+- [x] Top table-size and row-count changes
+- [x] Atomic history writes and snapshot retention
+- [x] Growth analyzer/store regression tests
+
 ### Next
-- [ ] Database growth history
 - [ ] Configuration drift comparison
 - [ ] IIS site/binding diagnostics
 - [ ] Windows Event Log collector

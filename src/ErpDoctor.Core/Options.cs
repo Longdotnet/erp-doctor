@@ -60,6 +60,7 @@ public sealed record SqlServerOptions
     public int BlockingWarningSeconds { get; init; } = 10;
     public int LongRunningWarningSeconds { get; init; } = 30;
     public int LargestTablesLimit { get; init; } = 10;
+    public int GrowthTablesLimit { get; init; } = 50;
 }
 
 public sealed record HttpOptions

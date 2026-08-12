@@ -24,6 +24,7 @@ internal static class ProgramEntry
         var jsonOutput = GetOption(args, "--json");
         var htmlOutput = GetOption(args, "--html");
         var bundleOutput = GetOption(args, "--bundle");
+        var historyPath = GetOption(args, "--history") ?? "erp-doctor-growth.json";
 
         if (command.Equals("report", StringComparison.OrdinalIgnoreCase) &&
             string.IsNullOrWhiteSpace(jsonOutput) &&
@@ -49,6 +50,31 @@ internal static class ProgramEntry
             return 2;
         }
 
+        using var cts = new CancellationTokenSource();
+        Console.CancelKeyPress += (_, eventArgs) =>
+        {
+            eventArgs.Cancel = true;
+            cts.Cancel();
+        };
+
+        if (command.Equals("growth", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                return await RunGrowthAsync(options, historyPath, cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                Console.Error.WriteLine("Growth snapshot cancelled.");
+                return 130;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Could not capture database growth: {ex.Message}");
+                return 1;
+            }
+        }
+
         var checks = BuildChecks(options);
         var runner = new DiagnosticRunner(checks);
         var context = new DiagnosticContext(options);
@@ -70,13 +96,6 @@ internal static class ProgramEntry
             PrintHelp();
             return 2;
         }
-
-        using var cts = new CancellationTokenSource();
-        Console.CancelKeyPress += (_, eventArgs) =>
-        {
-            eventArgs.Cancel = true;
-            cts.Cancel();
-        };
 
         IReadOnlyList<DiagnosticResult> results;
         try
@@ -125,6 +144,32 @@ internal static class ProgramEntry
         return results.Any(x => x.Status is DiagnosticStatus.Critical or DiagnosticStatus.Error)
             ? 1
             : 0;
+    }
+
+    private static async Task<int> RunGrowthAsync(
+        ErpDoctorOptions options,
+        string historyPath,
+        CancellationToken cancellationToken)
+    {
+        var context = new DiagnosticContext(options);
+        var collector = new SqlGrowthSnapshotCollector();
+        var store = new SqlGrowthHistoryStore();
+
+        var history = await store.LoadAsync(historyPath, cancellationToken);
+        var current = await collector.CaptureAsync(context, cancellationToken);
+        var previous = SqlGrowthAnalyzer.FindPrevious(history, current);
+        var comparison = previous is null
+            ? null
+            : SqlGrowthAnalyzer.Compare(previous, current);
+
+        var updatedHistory = store.Append(history, current);
+        var savedPath = await store.SaveAsync(
+            historyPath,
+            updatedHistory,
+            cancellationToken);
+
+        GrowthConsoleReport.Write(current, comparison, savedPath);
+        return 0;
     }
 
     private static async Task<string> WriteJsonReportAsync(
@@ -213,7 +258,8 @@ internal static class ProgramEntry
         value.Equals("--config", StringComparison.OrdinalIgnoreCase) ||
         value.Equals("--json", StringComparison.OrdinalIgnoreCase) ||
         value.Equals("--html", StringComparison.OrdinalIgnoreCase) ||
-        value.Equals("--bundle", StringComparison.OrdinalIgnoreCase);
+        value.Equals("--bundle", StringComparison.OrdinalIgnoreCase) ||
+        value.Equals("--history", StringComparison.OrdinalIgnoreCase);
 
     private static string? GetOption(string[] args, string name)
     {
@@ -237,6 +283,7 @@ internal static class ProgramEntry
               erp-doctor check [--config erp-doctor.json] [--json report.json] [--html report.html] [--bundle support.zip]
               erp-doctor report [--config erp-doctor.json] [--json report.json] [--html report.html]
               erp-doctor bundle [--config erp-doctor.json] [--bundle support.zip]
+              erp-doctor growth [--config erp-doctor.json] [--history erp-doctor-growth.json]
               erp-doctor system [--config erp-doctor.json]
               erp-doctor sql [--config erp-doctor.json]
               erp-doctor http [--config erp-doctor.json]
@@ -246,20 +293,107 @@ internal static class ProgramEntry
               check   Run every configured diagnostic and correlate likely causes.
               report  Run all checks and write a standalone HTML report by default.
               bundle  Run all checks and write a sanitized ZIP support bundle by default.
+              growth  Capture SQL database/table size and compare it with the previous local snapshot.
               system  Inspect disk, memory, runtime, and OS information.
               sql     Inspect SQL Server connectivity, size, largest tables, blocking, and long requests.
               http    Probe configured HTTP health endpoints.
               iis     Inspect configured IIS application pools on Windows.
 
-            Report output:
+            Output/state options:
               --json <path>     Write the stable machine-readable report schema as JSON.
               --html <path>     Write a standalone, dependency-free HTML diagnostic report.
               --bundle <path>   Write a sanitized ZIP with report.json, report.html, and manifest.json.
+              --history <path>  Local JSON history used by the growth command.
 
             Safety:
-              ERP Doctor v0.3 is read-only. Support bundles redact secret-like evidence before
-              serialization and do not include the source configuration file.
+              ERP Doctor v0.4 never writes to the ERP database. The growth command only writes
+              its own local history JSON file so future runs can calculate deltas.
             """);
+    }
+}
+
+internal static class GrowthConsoleReport
+{
+    public static void Write(
+        SqlGrowthSnapshot current,
+        SqlGrowthComparison? comparison,
+        string historyPath)
+    {
+        Console.WriteLine();
+        Console.WriteLine("ERP Doctor - Database Growth");
+        Console.WriteLine(new string('─', 72));
+        Console.WriteLine($"Database : {current.Server}/{current.Database}");
+        Console.WriteLine($"Captured : {current.CapturedAtUtc:yyyy-MM-dd HH:mm:ss} UTC");
+        Console.WriteLine(
+            $"Current  : {current.TotalSizeMb / 1024d:F2} GB total " +
+            $"({current.DataSizeMb / 1024d:F2} GB data, {current.LogSizeMb / 1024d:F2} GB log)");
+
+        if (comparison is null)
+        {
+            Console.WriteLine();
+            Console.WriteLine("Baseline created. Run `erp-doctor growth` again later to calculate growth deltas.");
+            Console.WriteLine($"History  : {historyPath}");
+            return;
+        }
+
+        Console.WriteLine();
+        Console.WriteLine(
+            $"Since    : {comparison.PreviousCapturedAtUtc:yyyy-MM-dd HH:mm:ss} UTC " +
+            $"({FormatInterval(comparison.Interval)})");
+        Console.WriteLine($"Data     : {FormatDelta(comparison.DataDeltaMb)}");
+        Console.WriteLine($"Log      : {FormatDelta(comparison.LogDeltaMb)}");
+        Console.WriteLine($"Total    : {FormatDelta(comparison.TotalDeltaMb)}");
+        if (comparison.TotalGrowthMbPerDay is { } perDay)
+        {
+            Console.WriteLine($"Rate     : {perDay:+0.0;-0.0;0.0} MB/day");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("Table growth");
+        Console.WriteLine(new string('─', 72));
+
+        if (comparison.TableGrowth.Count == 0)
+        {
+            Console.WriteLine("No table-size changes detected in the captured set.");
+        }
+        else
+        {
+            foreach (var table in comparison.TableGrowth)
+            {
+                if (table.IsNewInCapturedSet)
+                {
+                    Console.WriteLine(
+                        $"? {table.Name,-36} {table.CurrentReservedMb,10:F1} MB  new in captured set");
+                    continue;
+                }
+
+                Console.WriteLine(
+                    $"  {table.Name,-36} {table.ReservedDeltaMb,10:+0.0;-0.0;0.0} MB  " +
+                    $"rows {table.RowDelta,12:+#,0;-#,0;0}");
+            }
+        }
+
+        Console.WriteLine();
+        Console.WriteLine($"History  : {historyPath}");
+        Console.WriteLine("Note     : history is local ERP Doctor state; no history table is created in SQL Server.");
+    }
+
+    private static string FormatDelta(double value) =>
+        $"{value:+0.0;-0.0;0.0} MB";
+
+    private static string FormatInterval(TimeSpan value)
+    {
+        if (value.TotalDays >= 1)
+        {
+            return $"{value.TotalDays:F1} days";
+        }
+
+        if (value.TotalHours >= 1)
+        {
+            return $"{value.TotalHours:F1} hours";
+        }
+
+        return $"{Math.Max(1, value.TotalMinutes):F0} minutes";
     }
 }
 

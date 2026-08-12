@@ -5,7 +5,8 @@
     "logSizeWarningGb": 5,
     "blockingWarningSeconds": 10,
     "longRunningWarningSeconds": 30,
-    "largestTablesLimit": 10
+    "largestTablesLimit": 10,
+    "growthTablesLimit": 50
   },
   "http": {
     "endpoints": [

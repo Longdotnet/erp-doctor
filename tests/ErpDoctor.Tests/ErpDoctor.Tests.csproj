@@ -14,6 +14,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\ErpDoctor.Core\ErpDoctor.Core.csproj" />
+    <ProjectReference Include="..\..\src\ErpDoctor.Infrastructure\ErpDoctor.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\ErpDoctor.Reporting\ErpDoctor.Reporting.csproj" />
   </ItemGroup>
 </Project>
