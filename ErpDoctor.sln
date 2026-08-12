@@ -8,7 +8,13 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ErpDoctor.Infrastructure", 
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ErpDoctor.Reporting", "src\ErpDoctor.Reporting\ErpDoctor.Reporting.csproj", "{79316A8D-E8C2-4F0E-9B2C-27E84CBE76A1}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ErpDoctor.PluginSdk", "src\ErpDoctor.PluginSdk\ErpDoctor.PluginSdk.csproj", "{6D79A560-8B42-42C8-91F2-2D4B8E6AC101}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ErpDoctor.PluginHost", "src\ErpDoctor.PluginHost\ErpDoctor.PluginHost.csproj", "{A3D3F0E7-55C6-4F18-9C64-8D76A9B88402}"
+EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ErpDoctor.Cli", "src\ErpDoctor.Cli\ErpDoctor.Cli.csproj", "{FC0A8749-E3D2-48F5-B81A-7304A06B47F9}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ErpDoctor.SamplePlugin", "samples\ErpDoctor.SamplePlugin\ErpDoctor.SamplePlugin.csproj", "{B9F54BE8-492A-45B0-8E57-CF49F2630A03}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ErpDoctor.Tests", "tests\ErpDoctor.Tests\ErpDoctor.Tests.csproj", "{A5B76B8C-FEF2-4F68-9C58-3EC59B20C4A0}"
 EndProject
@@ -30,10 +36,22 @@ Global
 		{79316A8D-E8C2-4F0E-9B2C-27E84CBE76A1}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{79316A8D-E8C2-4F0E-9B2C-27E84CBE76A1}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{79316A8D-E8C2-4F0E-9B2C-27E84CBE76A1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6D79A560-8B42-42C8-91F2-2D4B8E6AC101}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6D79A560-8B42-42C8-91F2-2D4B8E6AC101}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6D79A560-8B42-42C8-91F2-2D4B8E6AC101}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6D79A560-8B42-42C8-91F2-2D4B8E6AC101}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A3D3F0E7-55C6-4F18-9C64-8D76A9B88402}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A3D3F0E7-55C6-4F18-9C64-8D76A9B88402}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A3D3F0E7-55C6-4F18-9C64-8D76A9B88402}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A3D3F0E7-55C6-4F18-9C64-8D76A9B88402}.Release|Any CPU.Build.0 = Release|Any CPU
 		{FC0A8749-E3D2-48F5-B81A-7304A06B47F9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{FC0A8749-E3D2-48F5-B81A-7304A06B47F9}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{FC0A8749-E3D2-48F5-B81A-7304A06B47F9}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{FC0A8749-E3D2-48F5-B81A-7304A06B47F9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B9F54BE8-492A-45B0-8E57-CF49F2630A03}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B9F54BE8-492A-45B0-8E57-CF49F2630A03}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B9F54BE8-492A-45B0-8E57-CF49F2630A03}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B9F54BE8-492A-45B0-8E57-CF49F2630A03}.Release|Any CPU.Build.0 = Release|Any CPU
 		{A5B76B8C-FEF2-4F68-9C58-3EC59B20C4A0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{A5B76B8C-FEF2-4F68-9C58-3EC59B20C4A0}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A5B76B8C-FEF2-4F68-9C58-3EC59B20C4A0}.Release|Any CPU.ActiveCfg = Release|Any CPU

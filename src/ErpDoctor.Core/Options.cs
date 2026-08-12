@@ -8,6 +8,7 @@ public sealed class ErpDoctorOptions
     public HttpOptions Http { get; init; } = new();
     public IisOptions Iis { get; init; } = new();
     public WindowsEventLogOptions WindowsEventLog { get; init; } = new();
+    public PluginOptions Plugins { get; init; } = new();
     public SystemOptions System { get; init; } = new();
 
     public static ErpDoctorOptions Load(string? path)
@@ -49,6 +50,12 @@ public sealed class ErpDoctorOptions
             },
             Iis = Iis,
             WindowsEventLog = WindowsEventLog,
+            Plugins = Plugins with
+            {
+                Assemblies = Plugins.Assemblies
+                    .Select(path => EnvironmentExpander.Expand(path) ?? string.Empty)
+                    .ToArray()
+            },
             System = System
         };
     }
@@ -107,6 +114,13 @@ public sealed record WindowsEventLogQueryOptions
     public int MaxEvents { get; init; } = 20;
     public bool IncludeWarnings { get; init; }
     public IReadOnlyList<string> Providers { get; init; } = Array.Empty<string>();
+}
+
+public sealed record PluginOptions
+{
+    public IReadOnlyList<string> Assemblies { get; init; } = Array.Empty<string>();
+    public IReadOnlyDictionary<string, JsonElement> Settings { get; init; } =
+        new Dictionary<string, JsonElement>();
 }
 
 public sealed record SystemOptions

@@ -6,6 +6,7 @@ using ErpDoctor.Infrastructure.IisDiagnostics;
 using ErpDoctor.Infrastructure.SqlServerDiagnostics;
 using ErpDoctor.Infrastructure.SystemDiagnostics;
 using ErpDoctor.Infrastructure.WindowsEventDiagnostics;
+using ErpDoctor.PluginHost;
 using ErpDoctor.Reporting;
 
 return await ProgramEntry.RunAsync(args);
@@ -88,6 +89,18 @@ internal static class ProgramEntry
             }
         }
 
+        var pluginDiscovery = ShouldLoadPlugins(command)
+            ? new PluginLoader().Load(options.Plugins, GetConfigDirectory(configPath))
+            : new PluginDiscovery(
+                Array.Empty<LoadedPlugin>(),
+                Array.Empty<PluginLoadIssue>());
+
+        if (command.Equals("plugins", StringComparison.OrdinalIgnoreCase))
+        {
+            PluginConsoleReport.Write(pluginDiscovery);
+            return pluginDiscovery.Issues.Count == 0 ? 0 : 1;
+        }
+
         var category = command.ToLowerInvariant() switch
         {
             "check" => null,
@@ -98,6 +111,7 @@ internal static class ProgramEntry
             "http" => "http",
             "iis" => "iis",
             "eventlog" => "eventlog",
+            "plugin" => "plugin",
             _ => "__unknown__"
         };
 
@@ -108,7 +122,7 @@ internal static class ProgramEntry
             return 2;
         }
 
-        var runner = new DiagnosticRunner(BuildChecks(options));
+        var runner = new DiagnosticRunner(BuildChecks(options, pluginDiscovery));
         var context = new DiagnosticContext(options);
         IReadOnlyList<DiagnosticResult> results;
         try
@@ -227,7 +241,9 @@ internal static class ProgramEntry
         return 0;
     }
 
-    private static IReadOnlyList<IDiagnosticCheck> BuildChecks(ErpDoctorOptions options)
+    private static IReadOnlyList<IDiagnosticCheck> BuildChecks(
+        ErpDoctorOptions options,
+        PluginDiscovery pluginDiscovery)
     {
         var checks = new List<IDiagnosticCheck>
         {
@@ -265,6 +281,7 @@ internal static class ProgramEntry
             checks.Add(new WindowsEventLogCheck(eventQuery));
         }
 
+        checks.AddRange(pluginDiscovery.DiagnosticChecks);
         return checks;
     }
 
@@ -299,6 +316,19 @@ internal static class ProgramEntry
         await File.WriteAllTextAsync(fullPath, content, cancellationToken);
         return fullPath;
     }
+
+    private static string GetConfigDirectory(string configPath)
+    {
+        var fullPath = Path.GetFullPath(configPath);
+        return Path.GetDirectoryName(fullPath) ?? Environment.CurrentDirectory;
+    }
+
+    private static bool ShouldLoadPlugins(string command) =>
+        command.Equals("check", StringComparison.OrdinalIgnoreCase) ||
+        command.Equals("report", StringComparison.OrdinalIgnoreCase) ||
+        command.Equals("bundle", StringComparison.OrdinalIgnoreCase) ||
+        command.Equals("plugin", StringComparison.OrdinalIgnoreCase) ||
+        command.Equals("plugins", StringComparison.OrdinalIgnoreCase);
 
     private static string GetCommand(string[] args)
     {
@@ -370,6 +400,8 @@ internal static class ProgramEntry
               erp-doctor http [--config erp-doctor.json]
               erp-doctor iis [--config erp-doctor.json]
               erp-doctor eventlog [--config erp-doctor.json]
+              erp-doctor plugins [--config erp-doctor.json]
+              erp-doctor plugin [--config erp-doctor.json]
 
             Commands:
               check        Run every configured diagnostic and correlate likely causes.
@@ -382,6 +414,8 @@ internal static class ProgramEntry
               http         Probe configured HTTP health endpoints.
               iis          Inspect configured IIS AppPools, sites, bindings, and physical paths on Windows.
               eventlog     Inspect configured recent Windows Event Log errors/warnings.
+              plugins      Discover configured plugin assemblies without executing plugin checks.
+              plugin       Run only checks contributed by configured plugins.
 
             Output/state options:
               --json <path>     Write the stable machine-readable report schema as JSON.
@@ -394,14 +428,14 @@ internal static class ProgramEntry
               --right <path>    Right JSON/appsettings file.
               --ignore <paths>  Comma/semicolon-separated path prefixes to ignore.
 
-            Exit codes for config-diff:
-              0  No drift found.
-              1  Drift found.
-              2  Invalid arguments, unreadable file, or invalid JSON.
+            Plugin safety:
+              Plugin assemblies are executable .NET code and run with ERP Doctor process permissions.
+              ERP Doctor loads plugins only from explicit local DLL paths in configuration. Only load
+              plugins you trust. Raw plugin exception messages are suppressed by the host.
 
             Safety:
-              ERP Doctor v0.7 keeps production diagnostics read-only. Windows Event Log checks
-              query and render entries only; they never clear, delete, or modify event channels.
+              ERP Doctor v0.8 keeps built-in production diagnostics read-only. Plugin behavior is owned
+              by the plugin author and is outside ERP Doctor's built-in read-only guarantee.
             """);
     }
 }

@@ -49,6 +49,10 @@
       }
     ]
   },
+  "plugins": {
+    "assemblies": [],
+    "settings": {}
+  },
   "system": {
     "diskWarningFreePercent": 15,
     "diskCriticalFreePercent": 5,

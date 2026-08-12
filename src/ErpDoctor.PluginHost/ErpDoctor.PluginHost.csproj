@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\ErpDoctor.Core\ErpDoctor.Core.csproj" />
+    <ProjectReference Include="..\ErpDoctor.PluginSdk\ErpDoctor.PluginSdk.csproj" />
+  </ItemGroup>
+</Project>
