@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - "v*.*.*"
+    branches:
+      - "agent/release-dry-run-*"
   workflow_dispatch:
     inputs:
       version:
@@ -34,10 +36,12 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF_TYPE" == "tag" ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
-          else
+          elif [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
             VERSION="$INPUT_VERSION"
+          else
+            VERSION="0.10.0-dev.${GITHUB_RUN_NUMBER}"
           fi
 
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
@@ -161,7 +165,7 @@ jobs:
           if-no-files-found: error
 
       - name: Create GitHub release
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -174,7 +178,7 @@ jobs:
             --title "ERP Doctor $GITHUB_REF_NAME"
 
       - name: Publish NuGet packages when API key is configured
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         shell: bash
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
