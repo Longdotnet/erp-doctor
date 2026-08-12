@@ -7,9 +7,7 @@
       "nginx": {
         "nginxExecutable": "nginx",
         "configPath": "/etc/nginx/nginx.conf",
-        "commandTimeoutSeconds": 10,
-        "loadPerCpuWarning": 1.0,
-        "loadPerCpuCritical": 2.0
+        "commandTimeoutSeconds": 10
       }
     }
   }
