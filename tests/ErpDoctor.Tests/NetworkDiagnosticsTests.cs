@@ -39,7 +39,7 @@ public sealed class NetworkDiagnosticsTests
         try
         {
             var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-            var acceptTask = listener.AcceptTcpClientAsync();
+            var acceptTask = listener.AcceptTcpClientAsync(TestContext.Current.CancellationToken);
             var check = new TcpConnectivityCheck(new NetworkTargetOptions
             {
                 Name = "Loopback service",
