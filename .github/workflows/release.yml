@@ -11,7 +11,7 @@ on:
       version:
         description: "SemVer used for a packaging dry run (no release is created)"
         required: true
-        default: "0.13.0-dev.1"
+        default: "0.14.0-dev.1"
 
 permissions:
   contents: write
@@ -41,7 +41,7 @@ jobs:
           elif [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
             VERSION="$INPUT_VERSION"
           else
-            VERSION="0.13.0-dev.${GITHUB_RUN_NUMBER}"
+            VERSION="0.14.0-dev.${GITHUB_RUN_NUMBER}"
           fi
 
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
@@ -161,6 +161,19 @@ jobs:
           cp samples/redis-plugin.example.json artifacts/redis-plugin/redis-plugin.example.json
           cp LICENSE artifacts/redis-plugin/LICENSE
 
+      - name: Publish RabbitMQ plugin bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet publish plugins/ErpDoctor.Plugin.RabbitMq/ErpDoctor.Plugin.RabbitMq.csproj \
+            --configuration Release \
+            --output artifacts/rabbitmq-plugin \
+            -p:Version="$VERSION"
+
+          cp docs/rabbitmq-plugin.md artifacts/rabbitmq-plugin/README.md
+          cp samples/rabbitmq-plugin.example.json artifacts/rabbitmq-plugin/rabbitmq-plugin.example.json
+          cp LICENSE artifacts/rabbitmq-plugin/LICENSE
+
       - name: Smoke test standalone Linux build and plugin loading
         shell: bash
         run: |
@@ -176,7 +189,8 @@ jobs:
                 "$GITHUB_WORKSPACE/artifacts/postgres-plugin/ErpDoctor.Plugin.Postgres.dll",
                 "$GITHUB_WORKSPACE/artifacts/docker-plugin/ErpDoctor.Plugin.Docker.dll",
                 "$GITHUB_WORKSPACE/artifacts/nginx-plugin/ErpDoctor.Plugin.Nginx.dll",
-                "$GITHUB_WORKSPACE/artifacts/redis-plugin/ErpDoctor.Plugin.Redis.dll"
+                "$GITHUB_WORKSPACE/artifacts/redis-plugin/ErpDoctor.Plugin.Redis.dll",
+                "$GITHUB_WORKSPACE/artifacts/rabbitmq-plugin/ErpDoctor.Plugin.RabbitMq.dll"
               ],
               "settings": {}
             }
@@ -194,6 +208,8 @@ jobs:
           grep -F "redis" <<< "$PLUGIN_OUTPUT"
           grep -F "Redis Diagnostics" <<< "$PLUGIN_OUTPUT"
           grep -F "checks   : 5" <<< "$PLUGIN_OUTPUT"
+          grep -F "rabbitmq" <<< "$PLUGIN_OUTPUT"
+          grep -F "RabbitMQ Diagnostics" <<< "$PLUGIN_OUTPUT"
 
       - name: Build release archives and checksums
         shell: bash
@@ -234,6 +250,11 @@ jobs:
             zip -q -r ../release/erp-doctor-plugin-redis.zip .
           )
 
+          (
+            cd artifacts/rabbitmq-plugin
+            zip -q -r ../release/erp-doctor-plugin-rabbitmq.zip .
+          )
+
           cp artifacts/nuget/*.nupkg artifacts/release/
 
           (
@@ -245,6 +266,7 @@ jobs:
               erp-doctor-plugin-docker.zip \
               erp-doctor-plugin-nginx.zip \
               erp-doctor-plugin-redis.zip \
+              erp-doctor-plugin-rabbitmq.zip \
               *.nupkg > checksums.txt
           )
 
