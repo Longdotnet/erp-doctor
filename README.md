@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4.svg)](https://dotnet.microsoft.com/)
 
-ERP Doctor is an open-source, evidence-first diagnostic CLI for the infrastructure small ERP teams end up owning all at once: **Windows, Linux, IIS, Nginx, .NET APIs, SQL Server, PostgreSQL, Redis, RabbitMQ, Docker, HTTP endpoints, Event Log, disks, memory, and environment configuration**.
+ERP Doctor is an open-source, evidence-first diagnostic CLI for the infrastructure small ERP teams end up owning all at once: **Windows, Linux, IIS, Nginx, .NET APIs, SQL Server, PostgreSQL, Redis, RabbitMQ, Docker, HTTP endpoints, DNS/TCP dependencies, Event Log, disks, memory, and environment configuration**.
 
 ```text
 CHECK -> COLLECT EVIDENCE -> CORRELATE -> DIAGNOSE -> RECOMMEND
@@ -20,7 +20,7 @@ erp-doctor check
 
 ## Why ERP Doctor?
 
-An endpoint can tell you an API is down. It usually cannot tell you whether the real issue is a stopped AppPool, Linux load pressure, invalid Nginx config, disk pressure, SQL blocking, Redis memory pressure, a RabbitMQ node alarm or queue backlog, an unhealthy container, config drift, or a failed .NET startup.
+An endpoint can tell you an API is down. It usually cannot tell you whether the real issue is a stopped AppPool, DNS failure, closed TCP port, Linux load pressure, invalid Nginx config, disk pressure, SQL blocking, Redis memory pressure, a RabbitMQ node alarm or queue backlog, an unhealthy container, config drift, or a failed .NET startup.
 
 ERP Doctor keeps those signals in one run so support/developers can reason about the **whole system**, not one component at a time.
 
@@ -29,6 +29,7 @@ ERP Doctor keeps those signals in one run so support/developers can reason about
 | Area | Diagnostics |
 | --- | --- |
 | System | Fixed-disk free space, memory, .NET runtime, OS |
+| Network | Cross-platform DNS resolution and TCP reachability/latency for explicitly configured dependencies |
 | SQL Server | Connectivity, data/log size, largest tables, blocking, long-running requests |
 | SQL growth | Local historical snapshots, size deltas, MB/day, table/row growth |
 | PostgreSQL plugin | Connectivity, database size, long-running queries, blocking sessions |
@@ -160,6 +161,7 @@ erp-doctor check --config erp-doctor.json
 ```text
 erp-doctor check        Run all configured built-in + plugin diagnostics
 erp-doctor system       System diagnostics only
+erp-doctor network      DNS + TCP diagnostics only
 erp-doctor sql          SQL Server diagnostics only
 erp-doctor http         HTTP endpoint diagnostics only
 erp-doctor iis          IIS diagnostics only
@@ -173,6 +175,37 @@ erp-doctor config-diff  Compare JSON/appsettings safely
 erp-doctor plugins      Discover configured plugins without running checks
 erp-doctor plugin       Run contributed plugin checks only
 ```
+
+## Network Doctor
+
+Configure explicit dependency targets and ERP Doctor will run a DNS check plus a TCP-connectivity check for each target:
+
+```json
+{
+  "network": {
+    "targets": [
+      {
+        "name": "ERP SQL",
+        "host": "${ERP_DB_HOST}",
+        "port": 1433,
+        "timeoutSeconds": 5,
+        "latencyWarningMs": 1000,
+        "maxResolvedAddresses": 5
+      }
+    ]
+  }
+}
+```
+
+```bash
+erp-doctor network --config erp-doctor.json
+```
+
+Network Doctor uses .NET DNS/TCP APIs directly, not shell tools. It does not scan neighboring hosts/ports, send application payloads, change DNS/firewall/routing, or copy raw socket exception messages into evidence.
+
+When an HTTP endpoint is Critical and its matching host/port TCP check is also Critical, the diagnosis engine can surface the network/listener layer as the likely failure boundary before suggesting application-level debugging.
+
+See [`docs/network-diagnostics.md`](docs/network-diagnostics.md).
 
 ## SQL Server growth
 
@@ -304,6 +337,7 @@ Every release runs restore → build → test → package. Dry-runs additionally
 
 - self-contained Windows/Linux publish,
 - standalone Linux `--help`,
+- standalone Linux Network Doctor DNS/TCP loopback behavior,
 - standalone loading of PostgreSQL (4), Docker (3), Nginx (3), Redis (5), and RabbitMQ (3) checks,
 - provider archive creation,
 - SHA256 verification for platform/provider/NuGet/installer assets,
@@ -322,7 +356,7 @@ Branch/manual dry-runs cannot create a GitHub Release or publish NuGet; publishi
              |                                 |
        Built-in checks                    PluginHost
              |                                 |
- System / SQL / HTTP / IIS / EventLog      PluginSdk DLLs
+ System / Network / SQL / HTTP / IIS / EventLog   PluginSdk DLLs
              |              /       /        |        |       |        \
              |         Sample  PostgreSQL  Redis  RabbitMQ  Docker   Nginx
              +----------------+----------------+
@@ -348,14 +382,15 @@ Current built-in/provider/installer behavior follows these principles:
 4. Event Log channels are never cleared/changed.
 5. SQL growth history writes local state only.
 6. Config drift never prints/hashes sensitive values.
-7. PostgreSQL provider never terminates/cancels backends.
-8. Redis provider never reads keys/values or changes Redis state/topology.
-9. RabbitMQ provider is GET-only and never publishes/purges/deletes/requeues messages or mutates broker topology/accounts.
-10. Docker provider never changes container/engine state.
-11. Nginx provider never reloads/stops Nginx or dumps the full config.
-12. Permission/CLI/API failures become diagnostics instead of privilege escalation.
-13. Self-contained installers verify SHA256 before extraction; Windows does not clear custom destination directories and Linux does not modify shell startup files.
-14. Third-party plugins remain a separate executable-code trust boundary.
+7. Network Doctor only probes explicitly configured DNS names/TCP ports; it performs no port scanning or network/firewall/routing mutation.
+8. PostgreSQL provider never terminates/cancels backends.
+9. Redis provider never reads keys/values or changes Redis state/topology.
+10. RabbitMQ provider is GET-only and never publishes/purges/deletes/requeues messages or mutates broker topology/accounts.
+11. Docker provider never changes container/engine state.
+12. Nginx provider never reloads/stops Nginx or dumps the full config.
+13. Permission/CLI/API failures become diagnostics instead of privilege escalation.
+14. Self-contained installers verify SHA256 before extraction; Windows does not clear custom destination directories and Linux does not modify shell startup files.
+15. Third-party plugins remain a separate executable-code trust boundary.
 
 ## Roadmap
 
@@ -376,11 +411,12 @@ Completed:
 - [x] v0.13 Redis provider
 - [x] v0.14 RabbitMQ provider
 - [x] v0.15 checksum-verified Windows/Linux installer UX
+- [x] v0.16 cross-platform DNS/TCP Network Doctor
 
 Next:
 
 - [ ] First public release/tag after explicit maintainer approval
-- [ ] Broader cross-platform system diagnostics
+- [ ] Broader cross-platform CPU/load/process diagnostics
 - [ ] Optional machine-readable integration/MCP surface after provider feedback
 - [ ] Additional providers driven by real incidents/contributor demand
 

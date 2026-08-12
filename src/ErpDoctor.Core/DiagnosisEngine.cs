@@ -50,6 +50,8 @@ public sealed class DiagnosisEngine
                 ]));
         }
 
+        AddNetworkHttpDiagnoses(results, diagnoses);
+
         var blocking = results.FirstOrDefault(x =>
             x.CheckId == "sql.blocking" &&
             x.Status is DiagnosticStatus.Warning or DiagnosticStatus.Critical);
@@ -76,5 +78,64 @@ public sealed class DiagnosisEngine
         }
 
         return diagnoses;
+    }
+
+    private static void AddNetworkHttpDiagnoses(
+        IReadOnlyList<DiagnosticResult> results,
+        ICollection<Diagnosis> diagnoses)
+    {
+        var tcpFailures = results
+            .Where(result =>
+                result.CheckId.StartsWith("network.tcp.", StringComparison.OrdinalIgnoreCase) &&
+                result.Status == DiagnosticStatus.Critical)
+            .ToArray();
+
+        if (tcpFailures.Length == 0)
+        {
+            return;
+        }
+
+        foreach (var http in results.Where(result =>
+                     result.CheckId.StartsWith("http.", StringComparison.OrdinalIgnoreCase) &&
+                     result.Status == DiagnosticStatus.Critical))
+        {
+            if (!http.EvidenceOrEmpty.TryGetValue("url", out var url) ||
+                !Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            {
+                continue;
+            }
+
+            var matchingTcp = tcpFailures.FirstOrDefault(tcp =>
+                MatchesHttpEndpoint(tcp, uri));
+            if (matchingTcp is null)
+            {
+                continue;
+            }
+
+            diagnoses.Add(new Diagnosis(
+                DiagnosticStatus.Critical,
+                "TCP reachability failure likely explains HTTP unavailability",
+                "The HTTP endpoint is unavailable and a configured TCP diagnostic for the same host and port also fails. This places the failure below the HTTP application layer and makes DNS, routing, firewall, listener, reverse-proxy, or process availability the immediate investigation path.",
+                [matchingTcp.Summary, http.Summary],
+                [
+                    "Confirm the destination process/reverse proxy is listening on the configured port.",
+                    "Inspect firewall, routing, VPN, NAT, security-group, and load-balancer rules between the diagnostic host and destination.",
+                    "If DNS also fails or is slow, resolve that before restarting application services.",
+                    "Re-run erp-doctor network and the HTTP check after the network/listener issue is corrected."
+                ]));
+        }
+    }
+
+    private static bool MatchesHttpEndpoint(DiagnosticResult tcp, Uri uri)
+    {
+        if (!tcp.EvidenceOrEmpty.TryGetValue("host", out var host) ||
+            !tcp.EvidenceOrEmpty.TryGetValue("port", out var portText) ||
+            !int.TryParse(portText, out var port))
+        {
+            return false;
+        }
+
+        return string.Equals(host, uri.Host, StringComparison.OrdinalIgnoreCase) &&
+               port == uri.Port;
     }
 }

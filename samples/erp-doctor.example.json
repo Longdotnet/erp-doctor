@@ -19,6 +19,18 @@
       }
     ]
   },
+  "network": {
+    "targets": [
+      {
+        "name": "ERP API",
+        "host": "localhost",
+        "port": 5001,
+        "timeoutSeconds": 5,
+        "latencyWarningMs": 1000,
+        "maxResolvedAddresses": 5
+      }
+    ]
+  },
   "iis": {
     "appPools": [
       "ErpApi"
