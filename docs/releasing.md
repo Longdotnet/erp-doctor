@@ -32,7 +32,7 @@ The Release workflow supports `workflow_dispatch` for manual packaging validatio
 Use a development SemVer such as:
 
 ```text
-0.17.0-dev.1
+0.18.0-dev.1
 ```
 
 A dry run:
@@ -44,6 +44,8 @@ A dry run:
 - runs the standalone Linux binary,
 - verifies standalone Linux Network Doctor DNS/TCP behavior against a loopback listener,
 - verifies standalone Linux System Doctor CPU/load/process-pressure checks execute without runtime errors,
+- verifies standalone Linux `--json -` output is one parseable schema `1.0` document with no human console leakage,
+- verifies the JSON stdout conflict guard rejects mixed HTML output without creating an artifact,
 - verifies that the standalone binary can discover all bundled provider DLLs with expected check counts,
 - packages `install.ps1` and `install.sh`,
 - creates ZIP/tar archives,
@@ -53,7 +55,7 @@ A dry run:
 - does **not** create a GitHub Release,
 - does **not** publish to NuGet.org.
 
-Normal Windows CI additionally runs the installer under Windows PowerShell, verifies that an intentionally bad checksum is rejected, installs from a valid local archive/checksum pair, and runs the installed `erp-doctor.exe --help`.
+Normal Windows CI additionally installs the packed global tool, parses `erp-doctor system --json -` with PowerShell `ConvertFrom-Json`, validates schema version `1.0`, tests the stdout conflict guard, then runs the existing checksum-verified installer gates.
 
 This is the required validation path before creating a release tag.
 
@@ -64,8 +66,8 @@ A tag matching `v*.*.*` triggers the same release pipeline and then creates a Gi
 Example:
 
 ```bash
-git tag v0.17.0
-git push origin v0.17.0
+git tag v0.18.0
+git push origin v0.18.0
 ```
 
 The release tag is the source of truth for published package versions. The workflow passes `-p:Version=<tag-version>` to build/pack/publish.
@@ -143,6 +145,33 @@ Top processes by memory
 
 The workflow rejects an `Error` result for any of those checks. A Warning/Critical resource status is allowed because GitHub-hosted runner load is not deterministic; this smoke validates runtime capability rather than asserting that the CI host is idle.
 
+## JSON stdout validation
+
+v0.18 adds a machine-readable transport gate against the self-contained Linux artifact:
+
+```bash
+erp-doctor system --config artifacts/system-pressure-smoke.json --json -
+```
+
+The release workflow requires:
+
+- process exit code `0` or `1`, where `1` is allowed because it represents valid Critical/Error diagnostic health rather than transport failure,
+- exactly one compact stdout line,
+- valid JSON parsing,
+- `schemaVersion == "1.0"`,
+- a non-empty `results` array,
+- no human console markers in stdout.
+
+It also verifies this invalid combination:
+
+```bash
+erp-doctor system --json - --html artifacts/json-stdout-conflict.html
+```
+
+must return usage exit code `2`, write nothing to stdout, and create no HTML artifact. This keeps machine-readable stdout deterministic for CI, agents, and future integration/MCP wrappers.
+
+See [`json-stdout.md`](json-stdout.md).
+
 ## Installer validation
 
 The installer scripts support both normal GitHub Release downloads and local archive/checksum inputs used by CI.
@@ -193,15 +222,16 @@ Get-FileHash .\erp-doctor-win-x64.zip -Algorithm SHA256
 
 Before a real release:
 
-1. `main` CI is green, including Windows installer validation.
-2. A Release dry run for the intended version is green, including Linux installer, Network Doctor, and System Doctor pressure validation.
+1. `main` CI is green, including Windows JSON stdout and installer validation.
+2. A Release dry run for the intended version is green, including Linux installer, Network Doctor, System Doctor pressure, and JSON stdout validation.
 3. Self-contained Windows/Linux publishes pass.
 4. PostgreSQL, Docker, Nginx, Redis, and RabbitMQ provider archives are present.
 5. The standalone Linux binary discovers all five providers with expected check counts (PostgreSQL 4, Docker 3, Nginx 2, Redis 5, RabbitMQ 3).
 6. The standalone Linux binary passes the DNS/TCP Network Doctor loopback smoke.
 7. The standalone Linux binary executes CPU/load/process-pressure checks without Error results.
-8. `install.ps1`, `install.sh`, and every other release asset have entries in `checksums.txt`.
-9. Every checksum verifies.
-10. README/config/install examples contain no customer-specific secrets/data.
-11. Every bundled provider is intentionally included.
-12. Only then create/push the release tag.
+8. `--json -` produces one parseable schema `1.0` document and its mixed-output conflict guard passes.
+9. `install.ps1`, `install.sh`, and every other release asset have entries in `checksums.txt`.
+10. Every checksum verifies.
+11. README/config/install examples contain no customer-specific secrets/data.
+12. Every bundled provider is intentionally included.
+13. Only then create/push the release tag.
