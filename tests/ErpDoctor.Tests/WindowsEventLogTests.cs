@@ -55,7 +55,7 @@ public sealed class WindowsEventLogTests
 
         var parsed = WindowsEventXmlParser.Parse(xml);
 
-        Assert.Contains("ApplicationPath=D:\\Apps\\ERP", parsed.Message, StringComparison.Ordinal);
+        Assert.Contains(@"ApplicationPath=D:\Apps\ERP", parsed.Message, StringComparison.Ordinal);
         Assert.Contains("ErrorCode=0x8007000d", parsed.Message, StringComparison.Ordinal);
     }
 
