@@ -94,6 +94,10 @@ jobs:
             throw "Conflicting JSON stdout invocation created an HTML artifact."
           }
 
+          # The last native command intentionally returned 2 for the conflict assertion.
+          # Reset it so GitHub's PowerShell wrapper does not treat that expected value as the step result.
+          $global:LASTEXITCODE = 0
+
       - name: Validate installer script syntax and help
         shell: powershell
         run: |
