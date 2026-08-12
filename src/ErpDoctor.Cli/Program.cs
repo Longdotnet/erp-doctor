@@ -286,6 +286,11 @@ internal static class ProgramEntry
             checks.Add(new IisAppPoolCheck(appPool));
         }
 
+        foreach (var site in options.Iis.Sites)
+        {
+            checks.Add(new IisSiteCheck(site));
+        }
+
         return checks;
     }
 
@@ -368,7 +373,7 @@ internal static class ProgramEntry
               system       Inspect disk, memory, runtime, and OS information.
               sql          Inspect SQL Server connectivity, size, largest tables, blocking, and long requests.
               http         Probe configured HTTP health endpoints.
-              iis          Inspect configured IIS application pools on Windows.
+              iis          Inspect configured IIS AppPools, sites, bindings, and physical paths on Windows.
 
             Output/state options:
               --json <path>     Write the stable machine-readable report schema as JSON.
@@ -387,8 +392,8 @@ internal static class ProgramEntry
               2  Invalid arguments, unreadable file, or invalid JSON.
 
             Safety:
-              ERP Doctor v0.5 never writes to the ERP database. Configuration comparison reads
-              local JSON only and redacts sensitive values before printing them.
+              ERP Doctor v0.6 keeps IIS diagnostics read-only. It inspects configured AppPools,
+              sites, bindings, and physical paths but never starts/stops or rewrites IIS objects.
             """);
     }
 }
