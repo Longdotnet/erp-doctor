@@ -1,5 +1,7 @@
 using System.Text.Json;
+using ErpDoctor.Core;
 using ErpDoctor.Plugin.Postgres;
+using ErpDoctor.PluginHost;
 using ErpDoctor.PluginSdk;
 using Xunit;
 using PostgresPluginType = ErpDoctor.Plugin.Postgres.PostgresPlugin;
@@ -47,6 +49,27 @@ public sealed class PostgresPluginTests
         Assert.Contains(checks, check => check.Id == "long-running");
         Assert.Contains(checks, check => check.Id == "blocking");
         Assert.All(checks, check => Assert.Equal("postgres", check.Category));
+    }
+
+    [Fact]
+    public void PluginHost_DiscoversAndNamespacesPostgreSqlChecks()
+    {
+        var options = new PluginOptions
+        {
+            Assemblies = [typeof(PostgresPluginType).Assembly.Location]
+        };
+
+        var discovery = new PluginLoader().Load(options, Environment.CurrentDirectory);
+
+        var plugin = Assert.Single(discovery.Plugins);
+        Assert.Empty(discovery.Issues);
+        Assert.Equal("postgres", plugin.Id);
+        Assert.Equal(4, plugin.Checks.Count);
+        Assert.Contains(plugin.Checks, check => check.Id == "plugin.postgres.connectivity");
+        Assert.Contains(plugin.Checks, check => check.Id == "plugin.postgres.database-size");
+        Assert.Contains(plugin.Checks, check => check.Id == "plugin.postgres.long-running");
+        Assert.Contains(plugin.Checks, check => check.Id == "plugin.postgres.blocking");
+        Assert.All(plugin.Checks, check => Assert.Equal("plugin", check.Category));
     }
 
     [Fact]
