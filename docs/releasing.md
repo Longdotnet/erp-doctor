@@ -21,7 +21,7 @@ ErpDoctor.PluginSdk.<version>.nupkg
 checksums.txt
 ```
 
-The Windows and Linux archives are self-contained .NET 8 builds. PostgreSQL, Docker, Linux/Nginx, Redis, and RabbitMQ are shipped as separate provider bundles because plugins remain an explicit trust/install boundary.
+The Windows and Linux archives are self-contained .NET 8 builds. PostgreSQL, Docker, Nginx, Redis, and RabbitMQ are shipped as separate provider bundles because plugins remain an explicit trust/install boundary.
 
 `install.ps1` and `install.sh` are release assets too. Both scripts verify the platform archive SHA256 before extraction, and both installer files are themselves included in `checksums.txt`.
 
@@ -32,7 +32,7 @@ The Release workflow supports `workflow_dispatch` for manual packaging validatio
 Use a development SemVer such as:
 
 ```text
-0.16.0-dev.1
+0.17.0-dev.1
 ```
 
 A dry run:
@@ -40,9 +40,10 @@ A dry run:
 - restores, builds, and tests the solution,
 - packs the global tool and Plugin SDK,
 - publishes self-contained `win-x64` and `linux-x64` builds,
-- publishes PostgreSQL, Docker, Linux/Nginx, Redis, and RabbitMQ provider bundles,
+- publishes PostgreSQL, Docker, Nginx, Redis, and RabbitMQ provider bundles,
 - runs the standalone Linux binary,
 - verifies standalone Linux Network Doctor DNS/TCP behavior against a loopback listener,
+- verifies standalone Linux System Doctor CPU/load/process-pressure checks execute without runtime errors,
 - verifies that the standalone binary can discover all bundled provider DLLs with expected check counts,
 - packages `install.ps1` and `install.sh`,
 - creates ZIP/tar archives,
@@ -63,8 +64,8 @@ A tag matching `v*.*.*` triggers the same release pipeline and then creates a Gi
 Example:
 
 ```bash
-git tag v0.16.0
-git push origin v0.16.0
+git tag v0.17.0
+git push origin v0.17.0
 ```
 
 The release tag is the source of truth for published package versions. The workflow passes `-p:Version=<tag-version>` to build/pack/publish.
@@ -108,15 +109,15 @@ Release smoke testing verifies the self-contained ERP Doctor binary can load:
 
 - PostgreSQL: 4 checks,
 - Docker: 3 checks,
-- Linux/Nginx: 3 checks,
+- Nginx: 2 checks,
 - Redis: 5 checks,
 - RabbitMQ: 3 checks.
 
-The provider smoke test validates discovery/loading only. It does not execute provider diagnostics against live services. Live-service permissions, authentication, management endpoints, and availability remain deployment-specific runtime concerns.
+Starting in v0.17, generic Linux host load/resource diagnostics are built into System Doctor rather than being contributed by the Nginx provider. The provider smoke test validates discovery/loading only; it does not execute provider diagnostics against live services.
 
 ## Network Doctor validation
 
-The Linux release dry-run also starts a loopback-only temporary listener and executes:
+The Linux release dry-run starts a loopback-only temporary listener and executes:
 
 ```bash
 erp-doctor network --config artifacts/network-smoke.json
@@ -124,7 +125,23 @@ erp-doctor network --config artifacts/network-smoke.json
 
 The configured target uses `127.0.0.1` and a fixed CI-only port. The command must complete successfully, proving that the self-contained Linux artifact can perform both built-in DNS and TCP diagnostics without shell/network-tool dependencies.
 
-The listener exists only for the workflow step and is terminated automatically when the step exits.
+## System pressure validation
+
+The Linux release dry-run also executes:
+
+```bash
+erp-doctor system --config artifacts/system-pressure-smoke.json
+```
+
+The smoke requires the self-contained Linux binary to emit all three v0.17 checks:
+
+```text
+System CPU
+System load average
+Top processes by memory
+```
+
+The workflow rejects an `Error` result for any of those checks. A Warning/Critical resource status is allowed because GitHub-hosted runner load is not deterministic; this smoke validates runtime capability rather than asserting that the CI host is idle.
 
 ## Installer validation
 
@@ -177,13 +194,14 @@ Get-FileHash .\erp-doctor-win-x64.zip -Algorithm SHA256
 Before a real release:
 
 1. `main` CI is green, including Windows installer validation.
-2. A Release dry run for the intended version is green, including Linux installer and Network Doctor loopback validation.
+2. A Release dry run for the intended version is green, including Linux installer, Network Doctor, and System Doctor pressure validation.
 3. Self-contained Windows/Linux publishes pass.
 4. PostgreSQL, Docker, Nginx, Redis, and RabbitMQ provider archives are present.
-5. The standalone Linux binary discovers all five providers with expected check counts.
+5. The standalone Linux binary discovers all five providers with expected check counts (PostgreSQL 4, Docker 3, Nginx 2, Redis 5, RabbitMQ 3).
 6. The standalone Linux binary passes the DNS/TCP Network Doctor loopback smoke.
-7. `install.ps1`, `install.sh`, and every other release asset have entries in `checksums.txt`.
-8. Every checksum verifies.
-9. README/config/install examples contain no customer-specific secrets/data.
-10. Every bundled provider is intentionally included.
-11. Only then create/push the release tag.
+7. The standalone Linux binary executes CPU/load/process-pressure checks without Error results.
+8. `install.ps1`, `install.sh`, and every other release asset have entries in `checksums.txt`.
+9. Every checksum verifies.
+10. README/config/install examples contain no customer-specific secrets/data.
+11. Every bundled provider is intentionally included.
+12. Only then create/push the release tag.
