@@ -1,6 +1,6 @@
 # Releasing ERP Doctor
 
-ERP Doctor v0.10 uses `.github/workflows/release.yml` for repeatable packaging and releases.
+ERP Doctor uses `.github/workflows/release.yml` for repeatable packaging and releases.
 
 ## Outputs
 
@@ -10,6 +10,7 @@ A successful packaging run creates:
 erp-doctor-win-x64.zip
 erp-doctor-linux-x64.tar.gz
 erp-doctor-plugin-postgres.zip
+erp-doctor-plugin-docker.zip
 ErpDoctor.Tool.<version>.nupkg
 ErpDoctor.PluginSdk.<version>.nupkg
 checksums.txt
@@ -17,26 +18,28 @@ checksums.txt
 
 The Windows and Linux archives are self-contained .NET 8 builds, so the target machine does not need the .NET runtime installed.
 
-The PostgreSQL plugin is shipped separately because provider plugins remain an explicit trust/install boundary.
+PostgreSQL and Docker providers are shipped as separate plugin bundles because plugins remain an explicit trust/install boundary.
 
 ## Dry run
 
-The Release workflow supports `workflow_dispatch`.
+The Release workflow supports `workflow_dispatch` for manual packaging validation. Maintainer automation can also use a branch named `agent/release-dry-run-*`; branch dry runs can package/upload artifacts but are explicitly prevented from creating a GitHub Release or publishing NuGet packages.
 
-Run it from GitHub Actions with a SemVer such as:
+Run a manual dry run with a SemVer such as:
 
 ```text
-0.10.0-dev.1
+0.11.0-dev.1
 ```
 
-A manual run:
+A dry run:
 
 - restores, builds, and tests the solution,
 - packs the global tool and Plugin SDK,
 - publishes self-contained `win-x64` and `linux-x64` builds,
-- publishes the PostgreSQL plugin directory,
+- publishes the PostgreSQL and Docker plugin directories,
+- runs the standalone Linux binary,
+- verifies the standalone binary can discover both external plugin DLLs,
 - creates ZIP/tar archives,
-- creates SHA256 checksums,
+- creates and verifies SHA256 checksums,
 - uploads the files as a workflow artifact,
 - does **not** create a GitHub Release,
 - does **not** publish to NuGet.org.
@@ -50,13 +53,13 @@ A tag matching `v*.*.*` triggers the same pipeline and then creates a GitHub Rel
 Example:
 
 ```bash
-git tag v0.10.0
-git push origin v0.10.0
+git tag v0.11.0
+git push origin v0.11.0
 ```
 
 The workflow validates the version after removing the leading `v`. Invalid version strings fail before packaging.
 
-The release assets use stable names for the platform archives, while the NuGet files retain their package version.
+The release assets use stable names for platform/provider archives, while NuGet files retain their package version.
 
 ## Global tool package
 
@@ -72,7 +75,7 @@ CI validates every change by packing a synthetic `0.0.0-ci` package, installing 
 erp-doctor --help
 ```
 
-This catches packaging errors before a release tag exists.
+This catches global-tool packaging errors before a release tag exists.
 
 When the package has been published to NuGet.org, users can install it with:
 
@@ -85,6 +88,21 @@ Upgrade with:
 ```bash
 dotnet tool update --global ErpDoctor.Tool
 ```
+
+## Provider bundles
+
+Provider plugins are released separately from the standalone ERP Doctor binary.
+
+Current provider archives:
+
+```text
+erp-doctor-plugin-postgres.zip
+erp-doctor-plugin-docker.zip
+```
+
+Each provider archive contains its DLL/runtime dependencies when applicable, provider documentation, an example configuration, and the MIT license.
+
+The release smoke test does not execute PostgreSQL or Docker diagnostics against a live service. It verifies that the self-contained ERP Doctor binary can load both external provider assemblies and discover the expected check counts. Live service access remains an environment-specific runtime concern.
 
 ## NuGet.org publishing
 
@@ -109,7 +127,7 @@ If the secret is absent, the workflow prints a skip message and still completes 
 
 ## Checksums
 
-`checksums.txt` is generated with SHA256 for every release package.
+`checksums.txt` is generated with SHA256 for every release package and verified inside the workflow before artifact upload.
 
 Linux example:
 
@@ -142,8 +160,11 @@ to build/pack/publish. The release tag is therefore the source of truth for publ
 Before a real release:
 
 1. `main` CI must be green.
-2. Run the Release workflow manually in dry-run mode for the intended version.
-3. Confirm the dry-run includes all expected archives, `.nupkg` files, and `checksums.txt`.
-4. Review README/config examples for secrets or customer-specific data.
-5. Confirm any third-party plugin shipped in the release is intentionally included.
-6. Only then create/push the release tag.
+2. Run the Release workflow in dry-run mode for the intended version.
+3. Confirm standalone Windows/Linux builds pass.
+4. Confirm PostgreSQL and Docker plugin bundles are present.
+5. Confirm the standalone Linux binary discovers both provider plugins.
+6. Confirm every entry in `checksums.txt` verifies successfully.
+7. Review README/config examples for secrets or customer-specific data.
+8. Confirm every third-party/provider plugin shipped in the release is intentionally included.
+9. Only then create/push the release tag.

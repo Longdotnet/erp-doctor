@@ -1,0 +1,19 @@
+{
+  "plugins": {
+    "assemblies": [
+      "plugins/ErpDoctor.Plugin.Docker/bin/Release/net8.0/ErpDoctor.Plugin.Docker.dll"
+    ],
+    "settings": {
+      "docker": {
+        "dockerExecutable": "docker",
+        "commandTimeoutSeconds": 10,
+        "warnOnStoppedContainers": false,
+        "maxContainerEvidence": 20,
+        "expectedContainers": [
+          "erp-api",
+          "redis"
+        ]
+      }
+    }
+  }
+}

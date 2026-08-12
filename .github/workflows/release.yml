@@ -11,7 +11,7 @@ on:
       version:
         description: "SemVer used for a packaging dry run (no release is created)"
         required: true
-        default: "0.10.0-dev.1"
+        default: "0.11.0-dev.1"
 
 permissions:
   contents: write
@@ -41,7 +41,7 @@ jobs:
           elif [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
             VERSION="$INPUT_VERSION"
           else
-            VERSION="0.10.0-dev.${GITHUB_RUN_NUMBER}"
+            VERSION="0.11.0-dev.${GITHUB_RUN_NUMBER}"
           fi
 
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
@@ -122,6 +122,19 @@ jobs:
           cp samples/postgres-plugin.example.json artifacts/postgres-plugin/postgres-plugin.example.json
           cp LICENSE artifacts/postgres-plugin/LICENSE
 
+      - name: Publish Docker plugin bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet publish plugins/ErpDoctor.Plugin.Docker/ErpDoctor.Plugin.Docker.csproj \
+            --configuration Release \
+            --output artifacts/docker-plugin \
+            -p:Version="$VERSION"
+
+          cp docs/docker-plugin.md artifacts/docker-plugin/README.md
+          cp samples/docker-plugin.example.json artifacts/docker-plugin/docker-plugin.example.json
+          cp LICENSE artifacts/docker-plugin/LICENSE
+
       - name: Smoke test standalone Linux build and plugin loading
         shell: bash
         run: |
@@ -134,7 +147,8 @@ jobs:
           {
             "plugins": {
               "assemblies": [
-                "$GITHUB_WORKSPACE/artifacts/postgres-plugin/ErpDoctor.Plugin.Postgres.dll"
+                "$GITHUB_WORKSPACE/artifacts/postgres-plugin/ErpDoctor.Plugin.Postgres.dll",
+                "$GITHUB_WORKSPACE/artifacts/docker-plugin/ErpDoctor.Plugin.Docker.dll"
               ],
               "settings": {}
             }
@@ -145,6 +159,8 @@ jobs:
           echo "$PLUGIN_OUTPUT"
           grep -F "postgres" <<< "$PLUGIN_OUTPUT"
           grep -F "checks   : 4" <<< "$PLUGIN_OUTPUT"
+          grep -F "docker" <<< "$PLUGIN_OUTPUT"
+          grep -F "checks   : 3" <<< "$PLUGIN_OUTPUT"
 
       - name: Build release archives and checksums
         shell: bash
@@ -170,6 +186,11 @@ jobs:
             zip -q -r ../release/erp-doctor-plugin-postgres.zip .
           )
 
+          (
+            cd artifacts/docker-plugin
+            zip -q -r ../release/erp-doctor-plugin-docker.zip .
+          )
+
           cp artifacts/nuget/*.nupkg artifacts/release/
 
           (
@@ -178,6 +199,7 @@ jobs:
               erp-doctor-win-x64.zip \
               erp-doctor-linux-x64.tar.gz \
               erp-doctor-plugin-postgres.zip \
+              erp-doctor-plugin-docker.zip \
               *.nupkg > checksums.txt
           )
 
