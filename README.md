@@ -42,6 +42,92 @@ ERP Doctor collects those signals into one run and keeps the evidence together s
 | Support handoff | Sanitized ZIP bundle with JSON + HTML + manifest |
 | Plugin SDK | Explicit local DLL discovery and contributed diagnostic checks |
 
+## Install
+
+### From source
+
+Requirements:
+
+- .NET 8 SDK
+- Windows for IIS/Event Log diagnostics
+- SQL Server access for SQL Server diagnostics
+- PostgreSQL access only when using the optional PostgreSQL plugin
+
+```bash
+git clone https://github.com/Longdotnet/erp-doctor.git
+cd erp-doctor
+dotnet restore
+dotnet build ErpDoctor.sln
+```
+
+Run directly:
+
+```bash
+dotnet run --project src/ErpDoctor.Cli -- check --config erp-doctor.json
+```
+
+### .NET global tool
+
+ERP Doctor is packaged as:
+
+```text
+ErpDoctor.Tool
+```
+
+CI verifies the package by installing it into a clean temporary tool path and executing `erp-doctor --help` on every change.
+
+When the package is available on NuGet.org:
+
+```bash
+dotnet tool install --global ErpDoctor.Tool
+```
+
+Upgrade with:
+
+```bash
+dotnet tool update --global ErpDoctor.Tool
+```
+
+### Self-contained binaries
+
+The release pipeline produces self-contained archives that do not require a preinstalled .NET runtime:
+
+```text
+erp-doctor-win-x64.zip
+erp-doctor-linux-x64.tar.gz
+```
+
+Release assets also include:
+
+```text
+erp-doctor-plugin-postgres.zip
+ErpDoctor.Tool.<version>.nupkg
+ErpDoctor.PluginSdk.<version>.nupkg
+checksums.txt
+```
+
+See [`docs/releasing.md`](docs/releasing.md) for packaging, dry-run, checksums, and NuGet publishing.
+
+## First run
+
+Copy the default config:
+
+```powershell
+Copy-Item samples/erp-doctor.example.json erp-doctor.json
+```
+
+Keep SQL Server credentials out of the file:
+
+```powershell
+$env:ERP_DB="Server=localhost;Database=ERP;Integrated Security=True;TrustServerCertificate=True"
+```
+
+Run everything configured in the file:
+
+```bash
+erp-doctor check --config erp-doctor.json
+```
+
 ## Example
 
 ```text
@@ -79,40 +165,6 @@ CRITICAL: Application unavailable with critically low disk space
   -> Free disk space before attempting repeated restarts.
   -> Inspect application startup/Event Log evidence.
   -> Re-run erp-doctor check after the root cause is resolved.
-```
-
-## Getting started from source
-
-Requirements:
-
-- .NET 8 SDK
-- Windows for IIS/Event Log diagnostics
-- SQL Server access for SQL Server diagnostics
-- PostgreSQL access only when using the optional PostgreSQL plugin
-
-```bash
-git clone https://github.com/Longdotnet/erp-doctor.git
-cd erp-doctor
-dotnet restore
-dotnet build ErpDoctor.sln
-```
-
-Copy the default config:
-
-```powershell
-Copy-Item samples/erp-doctor.example.json erp-doctor.json
-```
-
-Keep SQL Server credentials out of the file:
-
-```powershell
-$env:ERP_DB="Server=localhost;Database=ERP;Integrated Security=True;TrustServerCertificate=True"
-```
-
-Run everything configured in the file:
-
-```bash
-dotnet run --project src/ErpDoctor.Cli -- check --config erp-doctor.json
 ```
 
 ## Commands
@@ -176,7 +228,7 @@ The history lives on the machine running ERP Doctor. No history table, trigger, 
 
 See [`docs/database-growth.md`](docs/database-growth.md).
 
-## PostgreSQL reference plugin (v0.9)
+## PostgreSQL reference plugin
 
 `ErpDoctor.Plugin.Postgres` is the first production-style reference provider built on the Plugin SDK. It uses Npgsql and contributes four read-only checks:
 
@@ -199,7 +251,7 @@ Set the PostgreSQL connection string in an environment variable:
 $env:ERP_DOCTOR_POSTGRES="Host=localhost;Port=5432;Database=erp;Username=erp_doctor;Password=..."
 ```
 
-Copy or adapt the example:
+Configuration stores only the environment-variable name:
 
 ```json
 {
@@ -210,8 +262,6 @@ Copy or adapt the example:
     "settings": {
       "postgres": {
         "connectionStringEnvironmentVariable": "ERP_DOCTOR_POSTGRES",
-        "connectionTimeoutSeconds": 5,
-        "commandTimeoutSeconds": 10,
         "databaseSizeWarningGb": 20,
         "longRunningWarningSeconds": 30,
         "blockingWarningSeconds": 10
@@ -221,21 +271,21 @@ Copy or adapt the example:
 }
 ```
 
-Discover the DLL without executing database checks:
+Discover without running database checks:
 
 ```bash
 erp-doctor plugins --config samples/postgres-plugin.example.json
 ```
 
-Run only PostgreSQL/plugin diagnostics:
+Run the provider:
 
 ```bash
 erp-doctor plugin --config samples/postgres-plugin.example.json
 ```
 
-The provider intentionally does **not** export SQL text from `pg_stat_activity`; long-running and blocking evidence is bounded to metadata such as backend PIDs, age, and wait event. It never calls `pg_terminate_backend` or `pg_cancel_backend`.
+The provider intentionally does **not** export SQL text from `pg_stat_activity`. It never calls `pg_terminate_backend` or `pg_cancel_backend`.
 
-See [`docs/postgres-plugin.md`](docs/postgres-plugin.md) and [`samples/postgres-plugin.example.json`](samples/postgres-plugin.example.json).
+See [`docs/postgres-plugin.md`](docs/postgres-plugin.md).
 
 ## Configuration drift
 
@@ -323,12 +373,6 @@ Validate discovery without running contributed checks:
 erp-doctor plugins --config erp-doctor.json
 ```
 
-Run only plugin checks:
-
-```bash
-erp-doctor plugin --config erp-doctor.json
-```
-
 Plugin IDs are automatically namespaced:
 
 ```text
@@ -352,6 +396,17 @@ The host therefore:
 - suppresses raw exception messages from plugin checks.
 
 ERP Doctor's built-in diagnostics are designed to be read-only. That guarantee cannot automatically be extended to arbitrary third-party plugin code. Only install plugins you trust.
+
+## Release pipeline
+
+The `Release` workflow has two modes:
+
+- **manual dispatch**: packaging dry-run only; uploads workflow artifacts and never creates a release,
+- **push tag `v*.*.*`**: runs the same validation, creates a GitHub Release, and optionally publishes NuGet packages when `NUGET_API_KEY` is configured.
+
+Every real release runs restore → build → test before packaging. SHA256 checksums are generated for all distributed archives/packages.
+
+See [`docs/releasing.md`](docs/releasing.md).
 
 ## Architecture
 
@@ -416,14 +471,15 @@ Completed:
 - [x] v0.7 Windows Event Log collector
 - [x] v0.8 Plugin SDK + PluginHost + sample plugin
 - [x] v0.9 PostgreSQL reference provider plugin
+- [x] v0.10 release automation + global-tool package smoke test
 
 Next:
 
-- [ ] Release automation and simple binary/global-tool installation
 - [ ] Docker diagnostics plugin
 - [ ] Linux/Nginx provider
 - [ ] Redis/RabbitMQ providers
 - [ ] Broader cross-platform support
+- [ ] Installer UX after release feedback
 
 ## Contributing
 
