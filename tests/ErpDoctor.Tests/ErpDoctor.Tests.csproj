@@ -19,5 +19,6 @@
     <ProjectReference Include="..\..\src\ErpDoctor.Reporting\ErpDoctor.Reporting.csproj" />
     <ProjectReference Include="..\..\samples\ErpDoctor.SamplePlugin\ErpDoctor.SamplePlugin.csproj" />
     <ProjectReference Include="..\..\plugins\ErpDoctor.Plugin.Postgres\ErpDoctor.Plugin.Postgres.csproj" />
+    <ProjectReference Include="..\..\plugins\ErpDoctor.Plugin.Docker\ErpDoctor.Plugin.Docker.csproj" />
   </ItemGroup>
 </Project>
