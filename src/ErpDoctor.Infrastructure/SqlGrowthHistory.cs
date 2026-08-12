@@ -213,7 +213,7 @@ public static class SqlGrowthAnalyzer
             .ToArray();
 
         var totalDeltaMb = current.TotalSizeMb - previous.TotalSizeMb;
-        var growthPerDay = interval.TotalHours >= 1
+        double? growthPerDay = interval.TotalHours >= 1
             ? totalDeltaMb / interval.TotalDays
             : null;
 
