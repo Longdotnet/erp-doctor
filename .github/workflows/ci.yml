@@ -16,10 +16,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 8.0.x
 
@@ -31,3 +31,28 @@ jobs:
 
       - name: Test
         run: dotnet test ErpDoctor.sln --configuration Release --no-build
+
+      - name: Pack global tool and Plugin SDK
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts/nuget | Out-Null
+          dotnet pack src/ErpDoctor.Cli/ErpDoctor.Cli.csproj `
+            --configuration Release `
+            --no-build `
+            --output artifacts/nuget `
+            -p:Version=0.0.0-ci
+          dotnet pack src/ErpDoctor.PluginSdk/ErpDoctor.PluginSdk.csproj `
+            --configuration Release `
+            --no-build `
+            --output artifacts/nuget `
+            -p:Version=0.0.0-ci
+
+      - name: Install packaged tool and run help
+        shell: pwsh
+        run: |
+          dotnet tool install `
+            --tool-path artifacts/tool-smoke `
+            ErpDoctor.Tool `
+            --version 0.0.0-ci `
+            --add-source "$PWD/artifacts/nuget"
+          & .\artifacts\tool-smoke\erp-doctor.exe --help
