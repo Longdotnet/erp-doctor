@@ -267,7 +267,7 @@ internal static class DockerContainerEvaluator
                 $"Docker containers look healthy: {runningCount}/{containers.Count} running; {expected.Count} expected container(s) satisfied."
         };
 
-        var suggestions = status switch
+        IReadOnlyList<string>? suggestions = status switch
         {
             PluginDiagnosticStatus.Critical =>
             [
