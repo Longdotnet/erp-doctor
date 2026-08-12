@@ -80,12 +80,18 @@ public sealed class McpServerTests
         var configPath = WriteMinimalConfig();
         try
         {
+            var publishedCommand = Environment.GetEnvironmentVariable("ERP_DOCTOR_MCP_SMOKE_COMMAND");
             var serverAssembly = typeof(McpDiagnosticService).Assembly.Location;
+            var command = string.IsNullOrWhiteSpace(publishedCommand) ? "dotnet" : publishedCommand;
+            var arguments = string.IsNullOrWhiteSpace(publishedCommand)
+                ? new[] { serverAssembly, "--config", configPath }
+                : new[] { "--config", configPath };
+
             var transport = new StdioClientTransport(new StdioClientTransportOptions
             {
                 Name = "ERP Doctor test server",
-                Command = "dotnet",
-                Arguments = [serverAssembly, "--config", configPath]
+                Command = command,
+                Arguments = arguments
             });
 
             await using var client = await McpClient.CreateAsync(
