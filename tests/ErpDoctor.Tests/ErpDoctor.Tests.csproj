@@ -22,5 +22,6 @@
     <ProjectReference Include="..\..\plugins\ErpDoctor.Plugin.Docker\ErpDoctor.Plugin.Docker.csproj" />
     <ProjectReference Include="..\..\plugins\ErpDoctor.Plugin.Nginx\ErpDoctor.Plugin.Nginx.csproj" />
     <ProjectReference Include="..\..\plugins\ErpDoctor.Plugin.Redis\ErpDoctor.Plugin.Redis.csproj" />
+    <ProjectReference Include="..\..\plugins\ErpDoctor.Plugin.RabbitMq\ErpDoctor.Plugin.RabbitMq.csproj" />
   </ItemGroup>
 </Project>
