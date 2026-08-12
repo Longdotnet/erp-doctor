@@ -1,39 +1,17 @@
-# Linux / Nginx diagnostics plugin
+# Nginx diagnostics plugin
 
 `ErpDoctor.Plugin.Nginx` is a read-only Plugin SDK provider for Linux hosts running Nginx.
 
-It deliberately avoids service-management and configuration-dump commands. The provider collects a small Linux runtime snapshot, reads the Nginx version, and validates Nginx configuration without reloading or restarting the service.
+Starting in ERP Doctor v0.17, generic Linux CPU/load/process pressure belongs to the built-in **System Doctor**. This provider stays focused on Nginx itself so a whole-system run does not report the same host resource signals twice.
 
 ## Checks
 
-The provider contributes three checks:
+The provider contributes two checks:
 
 ```text
-plugin.nginx.linux-runtime
 plugin.nginx.version
 plugin.nginx.config
 ```
-
-### Linux runtime
-
-On Linux, ERP Doctor reads these local files only:
-
-```text
-/etc/os-release
-/proc/uptime
-/proc/loadavg
-/proc/meminfo
-```
-
-Evidence includes distribution/version, uptime, logical processor count, 1/5/15-minute load averages, 1-minute load per CPU, and available-memory percentage when `MemAvailable` exists.
-
-Load severity is based on the configured 1-minute load-per-CPU thresholds:
-
-- below `loadPerCpuWarning`: Healthy,
-- at/above `loadPerCpuWarning`: Warning,
-- at/above `loadPerCpuCritical`: Critical.
-
-Load average is evidence of runnable/uninterruptible workload pressure, not a direct CPU-utilization percentage. Use the 5/15-minute values and normal Linux tooling before deciding on a remediation.
 
 ### Nginx version
 
@@ -59,7 +37,7 @@ When `configPath` is configured, it executes:
 nginx -t -q -c <configured-path>
 ```
 
-Nginx documents `-t` as testing configuration syntax and attempting to open referenced files, while `-q` suppresses non-error messages during configuration testing. A failed test is therefore `Critical`, but ERP Doctor intentionally suppresses the raw Nginx stderr in reports because configuration errors can contain environment-specific paths or values.
+Nginx documents `-t` as testing configuration syntax and attempting to open referenced files, while `-q` suppresses non-error messages during configuration testing. A failed test is therefore `Critical`, but ERP Doctor intentionally suppresses raw Nginx stderr in reports because configuration errors can contain environment-specific paths or values.
 
 ERP Doctor does not execute:
 
@@ -85,9 +63,7 @@ It never dumps the complete configuration and never changes Nginx process state.
       "nginx": {
         "nginxExecutable": "nginx",
         "configPath": "/etc/nginx/nginx.conf",
-        "commandTimeoutSeconds": 10,
-        "loadPerCpuWarning": 1.0,
-        "loadPerCpuCritical": 2.0
+        "commandTimeoutSeconds": 10
       }
     }
   }
@@ -96,13 +72,15 @@ It never dumps the complete configuration and never changes Nginx process state.
 
 See [`samples/nginx-plugin.example.json`](../samples/nginx-plugin.example.json).
 
-`configPath` is optional. When omitted, Nginx validates its normal/default configuration path.
+`configPath` is optional. When omitted, Nginx validates its normal/default configuration path. Command timeout is bounded to 1–60 seconds.
 
-Bounded settings:
+For host CPU/load/process diagnostics use:
 
-- command timeout: 1–60 seconds,
-- warning load-per-CPU: 0.1–100,
-- critical load-per-CPU: never below warning, max 200.
+```bash
+erp-doctor system --config erp-doctor.json
+```
+
+See [`system-pressure.md`](system-pressure.md).
 
 ## Build and run
 
@@ -130,7 +108,7 @@ Or include the provider in the whole-system run:
 erp-doctor check --config samples/nginx-plugin.example.json
 ```
 
-On non-Linux hosts all three contributed checks are `Skipped`. This lets the assembly remain build/testable cross-platform without pretending that Windows is a supported Nginx/Linux runtime target.
+On non-Linux hosts both contributed checks are `Skipped`. This lets the assembly remain build/testable cross-platform without pretending that Windows is a supported Nginx runtime target.
 
 ## Command safety
 
@@ -146,4 +124,4 @@ Run ERP Doctor under an account with the inspection permissions appropriate for 
 
 ## Why this is a plugin
 
-Linux/Nginx diagnostics are useful for reverse-proxy deployments but unnecessary for Windows/IIS installations. Keeping them in `plugins/` preserves a provider-neutral Core and makes the provider independently evolvable alongside Docker, PostgreSQL, and future Redis/RabbitMQ integrations.
+Nginx diagnostics are useful for reverse-proxy deployments but unnecessary for Windows/IIS installations. Keeping them in `plugins/` preserves a provider-neutral Core while generic host health remains in built-in System Doctor.
