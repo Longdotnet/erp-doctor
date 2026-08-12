@@ -1,8 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <PackageId>ErpDoctor.PluginSdk</PackageId>
-    <Version>0.1.0-alpha.1</Version>
+    <Version>0.10.0-alpha.1</Version>
+    <Authors>Longdotnet contributors</Authors>
     <Description>Public plugin contracts for ERP Doctor diagnostics.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/Longdotnet/erp-doctor</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>erp;diagnostics;plugin;sdk;dotnet</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 
