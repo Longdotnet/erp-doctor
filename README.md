@@ -16,7 +16,7 @@ Instead of opening SSMS, IIS Manager, Event Viewer, Task Manager, and a browser 
 erp-doctor check
 ```
 
-## What v0.5 checks
+## What v0.6 checks
 
 - Fixed-disk free space
 - System memory
@@ -28,12 +28,13 @@ erp-doctor check
 - Long-running SQL Server requests
 - HTTP endpoint status and latency
 - IIS application-pool state
+- IIS site state, bindings, and physical path
 - Cross-check correlation for likely root causes
 - Sanitized support-bundle export for support handoff
 - SQL database/table growth compared with a local historical baseline
 - Secret-safe JSON/appsettings configuration drift between environments
 
-ERP Doctor is intentionally **read-only toward your ERP stack**. It does not kill SQL sessions, shrink databases, restart IIS, delete logs, update ERP data, or rewrite appsettings files. Features such as `growth` may write ERP Doctor's own local state files.
+ERP Doctor is intentionally **read-only toward your ERP stack**. It does not kill SQL sessions, shrink databases, restart IIS, modify IIS bindings, delete logs, update ERP data, or rewrite appsettings files. Features such as `growth` may write ERP Doctor's own local state files.
 
 ## Example
 
@@ -55,6 +56,7 @@ i SQL Server largest tables      Top table: [dbo].[AuditLog]: 18,291,922 rows
 IIS
 ────────────────────────────────────────────────────────────────
 ✗ IIS AppPool ErpApi             AppPool state: Stopped
+✗ IIS Site ERP Site              1 expected binding(s) missing
 
 HTTP
 ────────────────────────────────────────────────────────────────
@@ -244,6 +246,29 @@ erp-doctor config-diff \
 
 See [`docs/config-drift.md`](docs/config-drift.md) for exact comparison and redaction semantics.
 
+## IIS sites and bindings
+
+The `iis` command can validate the site itself, not only its AppPool:
+
+```json
+{
+  "iis": {
+    "appPools": ["ErpApi"],
+    "sites": [
+      {
+        "name": "ERP Site",
+        "expectedBindings": ["https:*:443:erp.example.com"],
+        "checkPhysicalPath": true
+      }
+    ]
+  }
+}
+```
+
+For each configured site ERP Doctor checks whether the site is `Started`, whether its root physical path exists, and whether expected protocol/IP/port/host bindings are present. Extra live bindings remain evidence but do not fail the check. A missing site, missing required binding, stopped site, or missing required physical path is `Critical`.
+
+The implementation reads the IIS `Microsoft.Web.Administration.dll` already installed on Windows through reflection, so no extra package is required. It never starts/stops sites or changes bindings. See [`docs/iis-sites.md`](docs/iis-sites.md).
+
 ## Configuration
 
 See [`samples/erp-doctor.example.json`](samples/erp-doctor.example.json).
@@ -267,7 +292,13 @@ See [`samples/erp-doctor.example.json`](samples/erp-doctor.example.json).
     ]
   },
   "iis": {
-    "appPools": ["ErpApi"]
+    "appPools": ["ErpApi"],
+    "sites": [
+      {
+        "name": "ERP Site",
+        "expectedBindings": ["https:*:443:erp.example.com"]
+      }
+    ]
   }
 }
 ```
@@ -341,18 +372,19 @@ Configuration drift options:
 
 Production support tools should be boring and predictable.
 
-ERP Doctor v0.5 follows these rules:
+ERP Doctor v0.6 follows these rules:
 
 1. Diagnostics and growth queries are read-only toward the ERP/database.
 2. No automatic database repair or shrink.
 3. No automatic SQL session kill.
-4. No automatic IIS restart.
+4. No automatic IIS site/AppPool restart or binding/path modification.
 5. Configuration supports environment-variable secrets.
 6. Support bundles sanitize secret-like report data before writing output.
 7. The source configuration file is not included in support bundles.
 8. Growth history is ERP Doctor local state and never creates objects in SQL Server.
 9. Configuration drift reads local JSON only and never prints or hashes sensitive values.
-10. A diagnosis is presented as evidence-backed guidance, not absolute certainty.
+10. IIS site checks inspect Windows/IIS state without rewriting IIS configuration.
+11. A diagnosis is presented as evidence-backed guidance, not absolute certainty.
 
 Some SQL dynamic management views require additional SQL Server permissions. If a check cannot run, ERP Doctor reports the check as an error instead of attempting privilege escalation.
 
@@ -399,8 +431,14 @@ Some SQL dynamic management views require additional SQL Server permissions. If 
 - [x] Ignore path prefixes
 - [x] Config drift regression tests
 
+### v0.6
+- [x] IIS site-state diagnostics
+- [x] IIS binding evidence and expected-binding validation
+- [x] IIS root physical-path validation
+- [x] Dependency-free `Microsoft.Web.Administration` inspection
+- [x] IIS site evaluator regression tests
+
 ### Next
-- [ ] IIS site/binding diagnostics
 - [ ] Windows Event Log collector
 - [ ] Plugin SDK
 - [ ] PostgreSQL, Linux/Nginx, Docker, Redis providers
