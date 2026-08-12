@@ -82,8 +82,8 @@ public sealed class McpServerTests
             var structured = Assert.NotNull(result.StructuredContent);
             Assert.Equal(
                 "1.0",
-                structured.Value.GetProperty("schemaVersion").GetString());
-            Assert.True(structured.Value.GetProperty("results").GetArrayLength() > 0);
+                structured.GetProperty("schemaVersion").GetString());
+            Assert.True(structured.GetProperty("results").GetArrayLength() > 0);
         }
         finally
         {
