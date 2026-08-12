@@ -2,7 +2,7 @@
 
 > Diagnose boring enterprise applications before your users call you.
 
-ERP Doctor is a read-only diagnostic CLI for the stack that small ERP teams end up owning all at once: Windows servers, IIS, .NET APIs, SQL Server, disks, memory, and health endpoints.
+ERP Doctor is a read-only diagnostic CLI for the stack that small ERP teams end up owning all at once: Windows servers, IIS, .NET APIs, SQL Server, disks, memory, health endpoints, and environment configuration.
 
 The goal is simple:
 
@@ -16,7 +16,7 @@ Instead of opening SSMS, IIS Manager, Event Viewer, Task Manager, and a browser 
 erp-doctor check
 ```
 
-## What v0.4 checks
+## What v0.5 checks
 
 - Fixed-disk free space
 - System memory
@@ -31,8 +31,9 @@ erp-doctor check
 - Cross-check correlation for likely root causes
 - Sanitized support-bundle export for support handoff
 - SQL database/table growth compared with a local historical baseline
+- Secret-safe JSON/appsettings configuration drift between environments
 
-ERP Doctor is intentionally **read-only toward your ERP stack**. It does not kill SQL sessions, shrink databases, restart IIS, delete logs, or update ERP data. Features such as `growth` may write ERP Doctor's own local state files.
+ERP Doctor is intentionally **read-only toward your ERP stack**. It does not kill SQL sessions, shrink databases, restart IIS, delete logs, update ERP data, or rewrite appsettings files. Features such as `growth` may write ERP Doctor's own local state files.
 
 ## Example
 
@@ -199,6 +200,50 @@ erp-doctor growth --config customer-a.json --history history/customer-a.json
 
 The history file stores size metadata only; the SQL connection string is not persisted. ERP Doctor does not create any SQL history table, trigger, stored procedure, or Agent job. See [`docs/database-growth.md`](docs/database-growth.md).
 
+## Configuration drift
+
+Compare DEV/UAT/PROD/customer appsettings without copying values into a spreadsheet or accidentally pasting credentials into chat:
+
+```bash
+erp-doctor config-diff \
+  --left appsettings.Development.json \
+  --right appsettings.Production.json
+```
+
+Example:
+
+```text
+ERP Doctor - Configuration Drift
+────────────────────────────────────────────────────────────────────────
+Drift : 3 difference(s)
+
+~ Api:BaseUrl (different)
+  left  : https://dev.example.test
+  right : https://prod.example.test
+
+- FeatureFlags:NewCheckout (only on left)
+  left  : true
+  right : [MISSING]
+
+~ ConnectionStrings:ERP (different)
+  left  : [SET]
+  right : [SET]
+  note  : sensitive values are redacted; ERP Doctor does not hash or print them.
+```
+
+Ignore noisy sections when needed:
+
+```bash
+erp-doctor config-diff \
+  --left appsettings.Development.json \
+  --right appsettings.Production.json \
+  --ignore "Logging,Serilog"
+```
+
+`config-diff` returns `0` when there is no drift, `1` when drift exists, and `2` for invalid input. Sensitive paths such as connection strings, passwords, tokens, secrets, API/access/private keys, and authorization values are compared in memory but never printed or hashed. Common inline credentials inside otherwise ordinary strings are redacted before display.
+
+See [`docs/config-drift.md`](docs/config-drift.md) for exact comparison and redaction semantics.
+
 ## Configuration
 
 See [`samples/erp-doctor.example.json`](samples/erp-doctor.example.json).
@@ -230,34 +275,34 @@ See [`samples/erp-doctor.example.json`](samples/erp-doctor.example.json).
 ## Architecture
 
 ```text
-                    ErpDoctor.Cli
-                         |
-             +-----------+-----------+
-             |                       |
-      DiagnosticRunner           growth
-             |                       |
-   +---------+---------+       SQL read-only snapshot
-   |         |         |              |
- System   SQL Server HTTP/IIS    local JSON history
-   |         |         |              |
-   +---------+---------+         delta analyzer
-             |
-      DiagnosticResult
-             |
-       DiagnosisEngine
-             |
-      DiagnosticReport
-             |
-   +---------+----------------------+
-   |         |                      |
- Console    JSON            ErpDoctor.Reporting
+                         ErpDoctor.Cli
+                              |
+              +---------------+----------------+
+              |               |                |
+       DiagnosticRunner     growth        config-diff
+              |               |                |
+   +----------+---------+  SQL snapshot     JSON compare
+   |          |         |      |                |
+ System   SQL Server HTTP/IIS local history  secret-safe diff
+   |          |         |      |
+   +----------+---------+  delta analyzer
+              |
+       DiagnosticResult
+              |
+        DiagnosisEngine
+              |
+       DiagnosticReport
+              |
+   +----------+---------------------+
+   |          |                     |
+ Console     JSON           ErpDoctor.Reporting
                                   |       |
                                  HTML   Sanitizer
                                           |
                                     Support Bundle
 ```
 
-Every diagnostic implements the small `IDiagnosticCheck` contract. The core does not know about SQL Server, IIS, or HTTP, so future providers can be added without turning the CLI into one giant script.
+Every diagnostic implements the small `IDiagnosticCheck` contract. The diagnostic core does not know about SQL Server, IIS, or HTTP, and local analysis commands remain isolated from production write operations.
 
 ## Commands
 
@@ -266,6 +311,7 @@ erp-doctor check
 erp-doctor report
 erp-doctor bundle
 erp-doctor growth
+erp-doctor config-diff
 erp-doctor system
 erp-doctor sql
 erp-doctor http
@@ -283,11 +329,19 @@ Common options:
 --help            Show help
 ```
 
+Configuration drift options:
+
+```text
+--left <path>     Left JSON/appsettings file
+--right <path>    Right JSON/appsettings file
+--ignore <paths>  Comma/semicolon-separated path prefixes to ignore
+```
+
 ## Safety model
 
 Production support tools should be boring and predictable.
 
-ERP Doctor v0.4 follows these rules:
+ERP Doctor v0.5 follows these rules:
 
 1. Diagnostics and growth queries are read-only toward the ERP/database.
 2. No automatic database repair or shrink.
@@ -297,7 +351,8 @@ ERP Doctor v0.4 follows these rules:
 6. Support bundles sanitize secret-like report data before writing output.
 7. The source configuration file is not included in support bundles.
 8. Growth history is ERP Doctor local state and never creates objects in SQL Server.
-9. A diagnosis is presented as evidence-backed guidance, not absolute certainty.
+9. Configuration drift reads local JSON only and never prints or hashes sensitive values.
+10. A diagnosis is presented as evidence-backed guidance, not absolute certainty.
 
 Some SQL dynamic management views require additional SQL Server permissions. If a check cannot run, ERP Doctor reports the check as an error instead of attempting privilege escalation.
 
@@ -336,8 +391,15 @@ Some SQL dynamic management views require additional SQL Server permissions. If 
 - [x] Atomic history writes and snapshot retention
 - [x] Growth analyzer/store regression tests
 
+### v0.5
+- [x] `erp-doctor config-diff` command
+- [x] Case-insensitive nested JSON/appsettings comparison
+- [x] Missing/different/type-changed classification
+- [x] Secret-safe display without credential hashing
+- [x] Ignore path prefixes
+- [x] Config drift regression tests
+
 ### Next
-- [ ] Configuration drift comparison
 - [ ] IIS site/binding diagnostics
 - [ ] Windows Event Log collector
 - [ ] Plugin SDK
