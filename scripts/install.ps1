@@ -116,8 +116,6 @@ try {
     }
 
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-    Get-ChildItem -LiteralPath $InstallDir -Force -ErrorAction SilentlyContinue |
-        Remove-Item -Recurse -Force
     Copy-Item -Path (Join-Path $extractDir "*") -Destination $InstallDir -Recurse -Force
 
     $installedSourceExe = Join-Path $InstallDir (Split-Path -Leaf $sourceExe)
