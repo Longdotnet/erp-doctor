@@ -4,7 +4,14 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>erp-doctor</ToolCommandName>
     <PackageId>ErpDoctor.Tool</PackageId>
-    <Version>0.2.0-alpha.1</Version>
+    <Version>0.10.0-alpha.1</Version>
+    <Authors>Longdotnet contributors</Authors>
+    <Description>Evidence-first diagnostics for ERP infrastructure, databases, IIS, HTTP endpoints, Windows Event Log, configuration, and plugins.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/Longdotnet/erp-doctor</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>erp;diagnostics;sql-server;iis;postgresql;devops;support</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 
   <ItemGroup>
@@ -12,5 +19,9 @@
     <ProjectReference Include="..\ErpDoctor.Infrastructure\ErpDoctor.Infrastructure.csproj" />
     <ProjectReference Include="..\ErpDoctor.PluginHost\ErpDoctor.PluginHost.csproj" />
     <ProjectReference Include="..\ErpDoctor.Reporting\ErpDoctor.Reporting.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" Link="README.md" />
   </ItemGroup>
 </Project>
