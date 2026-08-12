@@ -1,9 +1,11 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using ErpDoctor.Core;
 using ErpDoctor.Infrastructure.HttpDiagnostics;
 using ErpDoctor.Infrastructure.IisDiagnostics;
 using ErpDoctor.Infrastructure.SqlServerDiagnostics;
 using ErpDoctor.Infrastructure.SystemDiagnostics;
+using ErpDoctor.Reporting;
 
 return await ProgramEntry.RunAsync(args);
 
@@ -17,9 +19,17 @@ internal static class ProgramEntry
             return 0;
         }
 
-        var command = args.FirstOrDefault(x => !x.StartsWith('-')) ?? "check";
+        var command = GetCommand(args);
         var configPath = GetOption(args, "--config") ?? "erp-doctor.json";
         var jsonOutput = GetOption(args, "--json");
+        var htmlOutput = GetOption(args, "--html");
+
+        if (command.Equals("report", StringComparison.OrdinalIgnoreCase) &&
+            string.IsNullOrWhiteSpace(jsonOutput) &&
+            string.IsNullOrWhiteSpace(htmlOutput))
+        {
+            htmlOutput = "erp-doctor-report.html";
+        }
 
         ErpDoctorOptions options;
         try
@@ -38,6 +48,7 @@ internal static class ProgramEntry
         var category = command.ToLowerInvariant() switch
         {
             "check" => null,
+            "report" => null,
             "system" => "system",
             "sql" => "sql",
             "http" => "http",
@@ -70,32 +81,65 @@ internal static class ProgramEntry
             return 130;
         }
 
-        var diagnoses = command.Equals("check", StringComparison.OrdinalIgnoreCase)
+        var shouldDiagnose = command.Equals("check", StringComparison.OrdinalIgnoreCase) ||
+                             command.Equals("report", StringComparison.OrdinalIgnoreCase);
+        var diagnoses = shouldDiagnose
             ? new DiagnosisEngine().Diagnose(results)
             : Array.Empty<Diagnosis>();
+        var report = DiagnosticReportFactory.Create(results, diagnoses);
 
-        ConsoleReport.Write(results, diagnoses);
+        ConsoleReport.Write(report);
 
         if (!string.IsNullOrWhiteSpace(jsonOutput))
         {
-            var payload = new
-            {
-                generatedAtUtc = DateTimeOffset.UtcNow,
-                results,
-                diagnoses
-            };
-
-            var json = JsonSerializer.Serialize(
-                payload,
-                new JsonSerializerOptions { WriteIndented = true });
-            await File.WriteAllTextAsync(jsonOutput, json);
+            var jsonPath = await WriteJsonReportAsync(report, jsonOutput, cts.Token);
             Console.WriteLine();
-            Console.WriteLine($"JSON report: {Path.GetFullPath(jsonOutput)}");
+            Console.WriteLine($"JSON report: {jsonPath}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(htmlOutput))
+        {
+            var html = new HtmlReportRenderer().Render(report);
+            var htmlPath = await WriteTextFileAsync(htmlOutput, html, cts.Token);
+            Console.WriteLine();
+            Console.WriteLine($"HTML report: {htmlPath}");
         }
 
         return results.Any(x => x.Status is DiagnosticStatus.Critical or DiagnosticStatus.Error)
             ? 1
             : 0;
+    }
+
+    private static async Task<string> WriteJsonReportAsync(
+        DiagnosticReport report,
+        string path,
+        CancellationToken cancellationToken)
+    {
+        var options = new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        };
+        options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
+
+        var json = JsonSerializer.Serialize(report, options);
+        return await WriteTextFileAsync(path, json, cancellationToken);
+    }
+
+    private static async Task<string> WriteTextFileAsync(
+        string path,
+        string content,
+        CancellationToken cancellationToken)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var directory = Path.GetDirectoryName(fullPath);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        await File.WriteAllTextAsync(fullPath, content, cancellationToken);
+        return fullPath;
     }
 
     private static IReadOnlyList<IDiagnosticCheck> BuildChecks(ErpDoctorOptions options)
@@ -129,6 +173,30 @@ internal static class ProgramEntry
         return checks;
     }
 
+    private static string GetCommand(string[] args)
+    {
+        for (var i = 0; i < args.Length; i++)
+        {
+            if (IsOptionWithValue(args[i]))
+            {
+                i++;
+                continue;
+            }
+
+            if (!args[i].StartsWith('-'))
+            {
+                return args[i];
+            }
+        }
+
+        return "check";
+    }
+
+    private static bool IsOptionWithValue(string value) =>
+        value.Equals("--config", StringComparison.OrdinalIgnoreCase) ||
+        value.Equals("--json", StringComparison.OrdinalIgnoreCase) ||
+        value.Equals("--html", StringComparison.OrdinalIgnoreCase);
+
     private static string? GetOption(string[] args, string name)
     {
         for (var i = 0; i < args.Length - 1; i++)
@@ -148,7 +216,8 @@ internal static class ProgramEntry
             ERP Doctor - read-only diagnostics for boring enterprise applications.
 
             Usage:
-              erp-doctor check [--config erp-doctor.json] [--json report.json]
+              erp-doctor check [--config erp-doctor.json] [--json report.json] [--html report.html]
+              erp-doctor report [--config erp-doctor.json] [--json report.json] [--html report.html]
               erp-doctor system [--config erp-doctor.json]
               erp-doctor sql [--config erp-doctor.json]
               erp-doctor http [--config erp-doctor.json]
@@ -156,13 +225,18 @@ internal static class ProgramEntry
 
             Commands:
               check   Run every configured diagnostic and correlate likely causes.
+              report  Run all checks and write a standalone HTML report by default.
               system  Inspect disk, memory, runtime, and OS information.
               sql     Inspect SQL Server connectivity, size, largest tables, blocking, and long requests.
               http    Probe configured HTTP health endpoints.
               iis     Inspect configured IIS application pools on Windows.
 
+            Report output:
+              --json <path>   Write the stable machine-readable report schema as JSON.
+              --html <path>   Write a standalone, dependency-free HTML diagnostic report.
+
             Safety:
-              ERP Doctor v0.1 is read-only. It does not restart IIS, kill SQL sessions,
+              ERP Doctor v0.2 is read-only. It does not restart IIS, kill SQL sessions,
               shrink databases, delete logs, or modify ERP data.
             """);
     }
@@ -170,13 +244,15 @@ internal static class ProgramEntry
 
 internal static class ConsoleReport
 {
-    public static void Write(
-        IReadOnlyList<DiagnosticResult> results,
-        IReadOnlyList<Diagnosis> diagnoses)
+    public static void Write(DiagnosticReport report)
     {
+        var results = report.Results;
+        var diagnoses = report.Diagnoses;
+
         Console.WriteLine();
         Console.WriteLine("ERP Doctor");
         Console.WriteLine(new string('─', 64));
+        Console.WriteLine($"Health score: {report.HealthScore}/100 | Overall: {report.OverallStatus}");
 
         foreach (var group in results.GroupBy(GetCategory))
         {
@@ -228,13 +304,11 @@ internal static class ConsoleReport
             }
         }
 
-        var healthy = results.Count(x => x.Status == DiagnosticStatus.Healthy);
-        var warning = results.Count(x => x.Status == DiagnosticStatus.Warning);
-        var critical = results.Count(x => x.Status == DiagnosticStatus.Critical);
-        var error = results.Count(x => x.Status == DiagnosticStatus.Error);
-
+        var summary = report.Summary;
         Console.WriteLine();
-        Console.WriteLine($"Summary: {healthy} healthy | {warning} warning | {critical} critical | {error} error");
+        Console.WriteLine(
+            $"Summary: {summary.Healthy} healthy | {summary.Info} info | {summary.Warning} warning | " +
+            $"{summary.Critical} critical | {summary.Error} error | {summary.Skipped} skipped");
     }
 
     private static string GetCategory(DiagnosticResult result)

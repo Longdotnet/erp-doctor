@@ -16,7 +16,7 @@ Instead of opening SSMS, IIS Manager, Event Viewer, Task Manager, and a browser 
 erp-doctor check
 ```
 
-## What v0.1 checks
+## What v0.2 checks
 
 - Fixed-disk free space
 - System memory
@@ -117,6 +117,23 @@ Export machine-readable evidence:
 dotnet run --project src/ErpDoctor.Cli -- check --config erp-doctor.json --json report.json
 ```
 
+Generate a standalone HTML report that can be opened or sent to another developer without a server:
+
+```bash
+dotnet run --project src/ErpDoctor.Cli -- report --config erp-doctor.json
+```
+
+By default, `report` writes `erp-doctor-report.html`. You can choose explicit outputs:
+
+```bash
+dotnet run --project src/ErpDoctor.Cli -- check \
+  --config erp-doctor.json \
+  --json report.json \
+  --html report.html
+```
+
+The JSON export now uses a stable report envelope containing a schema version, generated timestamp, overall status, health score, summary counts, raw diagnostic results, and correlated diagnoses. See [`docs/report-schema.md`](docs/report-schema.md) for the contract and scoring rules.
+
 ## Configuration
 
 See [`samples/erp-doctor.example.json`](samples/erp-doctor.example.json).
@@ -161,7 +178,13 @@ See [`samples/erp-doctor.example.json`](samples/erp-doctor.example.json).
                          |
                    DiagnosisEngine
                          |
-                  Console / JSON
+                  DiagnosticReport
+                         |
+          +--------------+--------------+
+          |              |              |
+       Console          JSON      ErpDoctor.Reporting
+                                         |
+                                        HTML
 ```
 
 Every diagnostic implements the small `IDiagnosticCheck` contract. The core does not know about SQL Server, IIS, or HTTP, so future providers can be added without turning the CLI into one giant script.
@@ -170,6 +193,7 @@ Every diagnostic implements the small `IDiagnosticCheck` contract. The core does
 
 ```text
 erp-doctor check
+erp-doctor report
 erp-doctor system
 erp-doctor sql
 erp-doctor http
@@ -180,7 +204,8 @@ Common options:
 
 ```text
 --config <path>   JSON configuration file
---json <path>     Export results and diagnoses as JSON
+--json <path>     Export the stable diagnostic report as JSON
+--html <path>     Export a standalone HTML diagnostic report
 --help            Show help
 ```
 
@@ -188,7 +213,7 @@ Common options:
 
 Production support tools should be boring and predictable.
 
-ERP Doctor v0.1 follows these rules:
+ERP Doctor v0.2 follows these rules:
 
 1. Diagnostics are read-only.
 2. No automatic database repair or shrink.
@@ -211,8 +236,15 @@ Some SQL dynamic management views require additional SQL Server permissions. If 
 - [x] JSON report
 - [x] CI and tests
 
+### v0.2
+- [x] Stable report schema
+- [x] Health score and overall status
+- [x] Standalone HTML report
+- [x] HTML-encoded evidence and suggestions
+- [x] `erp-doctor report` command
+- [x] Report tests
+
 ### Next
-- [ ] HTML report
 - [ ] Sanitized support bundle
 - [ ] Database growth history
 - [ ] Configuration drift comparison

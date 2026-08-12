@@ -4,11 +4,12 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>erp-doctor</ToolCommandName>
     <PackageId>ErpDoctor.Tool</PackageId>
-    <Version>0.1.0-alpha.1</Version>
+    <Version>0.2.0-alpha.1</Version>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\ErpDoctor.Core\ErpDoctor.Core.csproj" />
     <ProjectReference Include="..\ErpDoctor.Infrastructure\ErpDoctor.Infrastructure.csproj" />
+    <ProjectReference Include="..\ErpDoctor.Reporting\ErpDoctor.Reporting.csproj" />
   </ItemGroup>
 </Project>
