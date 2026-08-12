@@ -29,6 +29,12 @@ if (configPath.Contains("://", StringComparison.Ordinal))
 }
 
 var fullConfigPath = Path.GetFullPath(configPath);
+if (args.Length > 0 && !File.Exists(fullConfigPath))
+{
+    Console.Error.WriteLine("The explicitly configured MCP config file does not exist.");
+    return 2;
+}
+
 var builder = Host.CreateApplicationBuilder(Array.Empty<string>());
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole(options =>
