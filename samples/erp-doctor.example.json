@@ -22,6 +22,15 @@
   "iis": {
     "appPools": [
       "ErpApi"
+    ],
+    "sites": [
+      {
+        "name": "ERP Site",
+        "expectedBindings": [
+          "https:*:443:erp.example.com"
+        ],
+        "checkPhysicalPath": true
+      }
     ]
   },
   "system": {
