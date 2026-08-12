@@ -37,7 +37,13 @@ if ($Help) {
     exit 0
 }
 
-if (-not $IsWindows) {
+$isWindowsPlatform = [string]::Equals($env:OS, "Windows_NT", [StringComparison]::OrdinalIgnoreCase)
+$isWindowsVariable = Get-Variable -Name IsWindows -ErrorAction SilentlyContinue
+if ($null -ne $isWindowsVariable) {
+    $isWindowsPlatform = [bool]$isWindowsVariable.Value
+}
+
+if (-not $isWindowsPlatform) {
     throw "install.ps1 supports Windows only. Use scripts/install.sh on Linux."
 }
 
@@ -81,6 +87,15 @@ function Get-ExpectedSha256([string]$ChecksumFile, [string]$FileName) {
     throw "checksums.txt does not contain a SHA256 entry for $FileName."
 }
 
+function Invoke-Download([string]$Uri, [string]$OutFile) {
+    if ($PSVersionTable.PSVersion.Major -le 5) {
+        [Net.ServicePointManager]::SecurityProtocol =
+            [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    }
+
+    Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UseBasicParsing
+}
+
 try {
     New-Item -ItemType Directory -Force -Path $tempRoot, $extractDir | Out-Null
 
@@ -91,8 +106,8 @@ try {
     else {
         $baseUrl = Resolve-ReleaseBaseUrl $Version
         Write-Host "Downloading ERP Doctor Windows x64 release..."
-        Invoke-WebRequest -Uri "$baseUrl/$assetName" -OutFile $downloadedArchive
-        Invoke-WebRequest -Uri "$baseUrl/checksums.txt" -OutFile $downloadedChecksums
+        Invoke-Download "$baseUrl/$assetName" $downloadedArchive
+        Invoke-Download "$baseUrl/checksums.txt" $downloadedChecksums
         $resolvedArchive = $downloadedArchive
         $resolvedChecksums = $downloadedChecksums
     }
