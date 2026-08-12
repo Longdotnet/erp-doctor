@@ -1,0 +1,21 @@
+{
+  "plugins": {
+    "assemblies": [
+      "plugins/ErpDoctor.Plugin.Redis/bin/Release/net8.0/ErpDoctor.Plugin.Redis.dll"
+    ],
+    "settings": {
+      "redis": {
+        "redisCliExecutable": "redis-cli",
+        "host": "127.0.0.1",
+        "port": 6379,
+        "passwordEnvironmentVariable": "ERP_DOCTOR_REDIS_PASSWORD",
+        "tls": false,
+        "commandTimeoutSeconds": 10,
+        "memoryWarningPercent": 80,
+        "memoryCriticalPercent": 90,
+        "replicaLagWarningSeconds": 10,
+        "replicaLagCriticalSeconds": 30
+      }
+    }
+  }
+}
