@@ -11,7 +11,7 @@ on:
       version:
         description: "SemVer used for a packaging dry run (no release is created)"
         required: true
-        default: "0.17.0-dev.1"
+        default: "0.18.0-dev.1"
 
 permissions:
   contents: write
@@ -41,7 +41,7 @@ jobs:
           elif [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
             VERSION="$INPUT_VERSION"
           else
-            VERSION="0.17.0-dev.${GITHUB_RUN_NUMBER}"
+            VERSION="0.18.0-dev.${GITHUB_RUN_NUMBER}"
           fi
 
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
@@ -276,6 +276,61 @@ jobs:
              grep -F "x System load average" <<< "$SYSTEM_OUTPUT" || \
              grep -F "x Top processes by memory" <<< "$SYSTEM_OUTPUT"; then
             echo "A v0.17 system-pressure check returned Error."
+            exit 1
+          fi
+
+      - name: Smoke test standalone Linux JSON stdout integration
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          set +e
+          REPORT_JSON="$(artifacts/linux-x64/ErpDoctor.Cli system --config artifacts/system-pressure-smoke.json --json -)"
+          REPORT_EXIT=$?
+          set -e
+
+          if [[ "$REPORT_EXIT" -gt 1 ]]; then
+            echo "Unexpected JSON stdout diagnostic exit code: $REPORT_EXIT"
+            exit 1
+          fi
+
+          if [[ "$(printf '%s\n' "$REPORT_JSON" | wc -l)" -ne 1 ]]; then
+            echo "JSON stdout was not a single compact line."
+            exit 1
+          fi
+
+          REPORT_JSON="$REPORT_JSON" python3 - <<'PY'
+          import json
+          import os
+
+          report = json.loads(os.environ["REPORT_JSON"])
+          assert report["schemaVersion"] == "1.0"
+          assert isinstance(report["results"], list) and report["results"]
+          assert "overallStatus" in report
+          assert "summary" in report
+          PY
+
+          if grep -F "Health score:" <<< "$REPORT_JSON" || grep -F "Summary:" <<< "$REPORT_JSON"; then
+            echo "Human console output leaked into JSON stdout mode."
+            exit 1
+          fi
+
+          rm -f artifacts/json-stdout-conflict.html
+          set +e
+          CONFLICT_OUTPUT="$(artifacts/linux-x64/ErpDoctor.Cli system --json - --html artifacts/json-stdout-conflict.html 2>/dev/null)"
+          CONFLICT_EXIT=$?
+          set -e
+
+          if [[ "$CONFLICT_EXIT" -ne 2 ]]; then
+            echo "Expected JSON stdout / HTML conflict to return usage exit code 2."
+            exit 1
+          fi
+          if [[ -n "$CONFLICT_OUTPUT" ]]; then
+            echo "Conflicting JSON stdout invocation wrote to stdout."
+            exit 1
+          fi
+          if [[ -e artifacts/json-stdout-conflict.html ]]; then
+            echo "Conflicting JSON stdout invocation created an HTML artifact."
             exit 1
           fi
 
