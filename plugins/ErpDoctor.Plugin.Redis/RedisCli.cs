@@ -169,36 +169,53 @@ internal sealed class RedisCli
         return RedisCredentialResolution.Success(password);
     }
 
-    private static string? ClassifyRedisFailure(string stdout, string stderr)
+    internal static string? ClassifyRedisFailure(string stdout, string stderr) =>
+        ClassifyRedisErrorLine(FirstMeaningfulLine(stdout)) ??
+        ClassifyRedisErrorLine(FirstMeaningfulLine(stderr));
+
+    private static string? FirstMeaningfulLine(string value)
     {
-        var combined = string.Concat(stdout, "\n", stderr).TrimStart();
-        if (combined.Length == 0)
+        foreach (var rawLine in value.Split('\n'))
+        {
+            var line = rawLine.Trim();
+            if (line.Length > 0)
+            {
+                return line;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? ClassifyRedisErrorLine(string? line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
         {
             return null;
         }
 
-        if (ContainsToken(combined, "NOPERM"))
+        if (StartsWithToken(line, "NOPERM"))
         {
             return "Redis denied the diagnostic command through ACL permissions.";
         }
 
-        if (ContainsToken(combined, "NOAUTH") || ContainsToken(combined, "WRONGPASS"))
+        if (StartsWithToken(line, "NOAUTH") || StartsWithToken(line, "WRONGPASS"))
         {
             return "Redis authentication failed.";
         }
 
-        if (ContainsToken(combined, "LOADING"))
+        if (StartsWithToken(line, "LOADING"))
         {
             return "Redis is loading data and cannot serve the diagnostic command yet.";
         }
 
-        if (ContainsToken(combined, "MISCONF"))
+        if (StartsWithToken(line, "MISCONF"))
         {
             return "Redis reported a configuration error while serving the diagnostic command.";
         }
 
-        if (combined.StartsWith("ERR ", StringComparison.OrdinalIgnoreCase) ||
-            combined.StartsWith("(error)", StringComparison.OrdinalIgnoreCase))
+        if (line.StartsWith("ERR ", StringComparison.OrdinalIgnoreCase) ||
+            line.StartsWith("(error)", StringComparison.OrdinalIgnoreCase))
         {
             return "Redis returned an error response for the diagnostic command.";
         }
@@ -206,8 +223,9 @@ internal sealed class RedisCli
         return null;
     }
 
-    private static bool ContainsToken(string value, string token) =>
-        value.Contains(token, StringComparison.OrdinalIgnoreCase);
+    private static bool StartsWithToken(string value, string token) =>
+        value.StartsWith(token, StringComparison.OrdinalIgnoreCase) &&
+        (value.Length == token.Length || char.IsWhiteSpace(value[token.Length]));
 
     private static async Task DrainAsync(Task<string> stdoutTask, Task<string> stderrTask)
     {
