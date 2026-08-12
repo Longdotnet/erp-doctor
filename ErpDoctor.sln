@@ -24,6 +24,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ErpDoctor.Plugin.Nginx", "p
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ErpDoctor.Plugin.Redis", "plugins\ErpDoctor.Plugin.Redis\ErpDoctor.Plugin.Redis.csproj", "{C9A4B8F2-2D1E-4B91-8A4D-6F3E1C2B7D55}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ErpDoctor.Plugin.RabbitMq", "plugins\ErpDoctor.Plugin.RabbitMq\ErpDoctor.Plugin.RabbitMq.csproj", "{8F0D1E2A-3B4C-4D5E-9F60-1234567890AB}"
+EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ErpDoctor.Tests", "tests\ErpDoctor.Tests\ErpDoctor.Tests.csproj", "{A5B76B8C-FEF2-4F68-9C58-3EC59B20C4A0}"
 EndProject
 Global
@@ -76,6 +78,10 @@ Global
 		{C9A4B8F2-2D1E-4B91-8A4D-6F3E1C2B7D55}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{C9A4B8F2-2D1E-4B91-8A4D-6F3E1C2B7D55}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{C9A4B8F2-2D1E-4B91-8A4D-6F3E1C2B7D55}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8F0D1E2A-3B4C-4D5E-9F60-1234567890AB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8F0D1E2A-3B4C-4D5E-9F60-1234567890AB}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8F0D1E2A-3B4C-4D5E-9F60-1234567890AB}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8F0D1E2A-3B4C-4D5E-9F60-1234567890AB}.Release|Any CPU.Build.0 = Release|Any CPU
 		{A5B76B8C-FEF2-4F68-9C58-3EC59B20C4A0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{A5B76B8C-FEF2-4F68-9C58-3EC59B20C4A0}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A5B76B8C-FEF2-4F68-9C58-3EC59B20C4A0}.Release|Any CPU.ActiveCfg = Release|Any CPU

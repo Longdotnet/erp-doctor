@@ -13,12 +13,13 @@ erp-doctor-plugin-postgres.zip
 erp-doctor-plugin-docker.zip
 erp-doctor-plugin-nginx.zip
 erp-doctor-plugin-redis.zip
+erp-doctor-plugin-rabbitmq.zip
 ErpDoctor.Tool.<version>.nupkg
 ErpDoctor.PluginSdk.<version>.nupkg
 checksums.txt
 ```
 
-The Windows and Linux archives are self-contained .NET 8 builds. PostgreSQL, Docker, Linux/Nginx, and Redis are shipped as separate provider bundles because plugins remain an explicit trust/install boundary.
+The Windows and Linux archives are self-contained .NET 8 builds. PostgreSQL, Docker, Linux/Nginx, Redis, and RabbitMQ are shipped as separate provider bundles because plugins remain an explicit trust/install boundary.
 
 ## Dry run
 
@@ -27,7 +28,7 @@ The Release workflow supports `workflow_dispatch` for manual packaging validatio
 Use a development SemVer such as:
 
 ```text
-0.13.0-dev.1
+0.14.0-dev.1
 ```
 
 A dry run:
@@ -35,7 +36,7 @@ A dry run:
 - restores, builds, and tests the solution,
 - packs the global tool and Plugin SDK,
 - publishes self-contained `win-x64` and `linux-x64` builds,
-- publishes PostgreSQL, Docker, Linux/Nginx, and Redis provider bundles,
+- publishes PostgreSQL, Docker, Linux/Nginx, Redis, and RabbitMQ provider bundles,
 - runs the standalone Linux binary,
 - verifies that the standalone binary can discover all bundled provider DLLs with expected check counts,
 - creates ZIP/tar archives,
@@ -53,8 +54,8 @@ A tag matching `v*.*.*` triggers the same pipeline and then creates a GitHub Rel
 Example:
 
 ```bash
-git tag v0.13.0
-git push origin v0.13.0
+git tag v0.14.0
+git push origin v0.14.0
 ```
 
 The release tag is the source of truth for published package versions. The workflow passes `-p:Version=<tag-version>` to build/pack/publish.
@@ -89,6 +90,7 @@ erp-doctor-plugin-postgres.zip
 erp-doctor-plugin-docker.zip
 erp-doctor-plugin-nginx.zip
 erp-doctor-plugin-redis.zip
+erp-doctor-plugin-rabbitmq.zip
 ```
 
 Each archive contains its provider DLL/runtime dependencies when applicable, provider documentation, example configuration, and MIT license.
@@ -98,9 +100,10 @@ Release smoke testing verifies the self-contained ERP Doctor binary can load:
 - PostgreSQL: 4 checks,
 - Docker: 3 checks,
 - Linux/Nginx: 3 checks,
-- Redis: 5 checks.
+- Redis: 5 checks,
+- RabbitMQ: 3 checks.
 
-The smoke test validates provider discovery/loading only. It does not execute PostgreSQL, Docker, Nginx, or Redis diagnostics against live services. Live-service permissions, authentication, and availability remain deployment-specific runtime concerns.
+The smoke test validates provider discovery/loading only. It does not execute provider diagnostics against live services. Live-service permissions, authentication, management endpoints, and availability remain deployment-specific runtime concerns.
 
 ## NuGet.org publishing
 
@@ -136,8 +139,8 @@ Before a real release:
 1. `main` CI is green.
 2. A Release dry run for the intended version is green.
 3. Self-contained Windows/Linux publishes pass.
-4. PostgreSQL, Docker, Nginx, and Redis provider archives are present.
-5. The standalone Linux binary discovers all four providers with expected check counts.
+4. PostgreSQL, Docker, Nginx, Redis, and RabbitMQ provider archives are present.
+5. The standalone Linux binary discovers all five providers with expected check counts.
 6. Every checksum verifies.
 7. README/config examples contain no customer-specific secrets/data.
 8. Every bundled provider is intentionally included.

@@ -6,13 +6,13 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4.svg)](https://dotnet.microsoft.com/)
 
-ERP Doctor is an open-source, evidence-first diagnostic CLI for the infrastructure small ERP teams end up owning all at once: **Windows, Linux, IIS, Nginx, .NET APIs, SQL Server, PostgreSQL, Redis, Docker, HTTP endpoints, Event Log, disks, memory, and environment configuration**.
+ERP Doctor is an open-source, evidence-first diagnostic CLI for the infrastructure small ERP teams end up owning all at once: **Windows, Linux, IIS, Nginx, .NET APIs, SQL Server, PostgreSQL, Redis, RabbitMQ, Docker, HTTP endpoints, Event Log, disks, memory, and environment configuration**.
 
 ```text
 CHECK -> COLLECT EVIDENCE -> CORRELATE -> DIAGNOSE -> RECOMMEND
 ```
 
-Instead of opening SSMS, IIS Manager, Event Viewer, Task Manager, Docker/Linux tooling, database consoles, and a browser one by one:
+Instead of opening SSMS, IIS Manager, Event Viewer, Task Manager, broker/database consoles, Docker/Linux tooling, and a browser one by one:
 
 ```bash
 erp-doctor check
@@ -20,7 +20,7 @@ erp-doctor check
 
 ## Why ERP Doctor?
 
-An endpoint can tell you an API is down. It usually cannot tell you whether the real issue is a stopped AppPool, Linux load pressure, invalid Nginx config, disk pressure, SQL blocking, Redis memory pressure, an unhealthy container, config drift, or a failed .NET startup.
+An endpoint can tell you an API is down. It usually cannot tell you whether the real issue is a stopped AppPool, Linux load pressure, invalid Nginx config, disk pressure, SQL blocking, Redis memory pressure, a RabbitMQ node alarm or queue backlog, an unhealthy container, config drift, or a failed .NET startup.
 
 ERP Doctor keeps those signals in one run so support/developers can reason about the **whole system**, not one component at a time.
 
@@ -33,6 +33,7 @@ ERP Doctor keeps those signals in one run so support/developers can reason about
 | SQL growth | Local historical snapshots, size deltas, MB/day, table/row growth |
 | PostgreSQL plugin | Connectivity, database size, long-running queries, blocking sessions |
 | Redis plugin | Connectivity, server metadata, memory pressure, persistence, replication health |
+| RabbitMQ plugin | Management API overview, node resource alarms/partitions, queue backlog/unacked/consumer health |
 | Docker plugin | Engine reachability/version, engine summary, container state/health, expected containers |
 | Linux/Nginx plugin | Linux uptime/load/memory snapshot, Nginx version, config validation |
 | IIS | AppPool state, site state, bindings, root physical path |
@@ -81,6 +82,7 @@ erp-doctor-plugin-postgres.zip
 erp-doctor-plugin-docker.zip
 erp-doctor-plugin-nginx.zip
 erp-doctor-plugin-redis.zip
+erp-doctor-plugin-rabbitmq.zip
 ErpDoctor.Tool.<version>.nupkg
 ErpDoctor.PluginSdk.<version>.nupkg
 checksums.txt
@@ -151,39 +153,43 @@ erp-doctor plugin --config samples/postgres-plugin.example.json
 
 See [`docs/postgres-plugin.md`](docs/postgres-plugin.md).
 
-### Redis (v0.13)
+### Redis
 
-`ErpDoctor.Plugin.Redis` contributes:
+`ErpDoctor.Plugin.Redis` uses `redis-cli` with fixed argument lists and only executes `PING` plus selected `INFO` sections. It does **not** inspect keys/values or run `KEYS`, `SCAN`, `GET`, `CONFIG`, or `MONITOR`.
 
-```text
-plugin.redis.connectivity
-plugin.redis.server
-plugin.redis.memory
-plugin.redis.persistence
-plugin.redis.replication
-```
-
-It uses `redis-cli` with fixed argument lists and only executes `PING` plus selected `INFO` sections. It does **not** inspect keys/values or run `KEYS`, `SCAN`, `GET`, `CONFIG`, `MONITOR`, or other data/config discovery commands.
-
-Passwords stay out of JSON and process arguments. Configure only the environment-variable name:
-
-```powershell
-$env:ERP_DOCTOR_REDIS_PASSWORD="your-secret"
-```
-
-```json
-{
-  "passwordEnvironmentVariable": "ERP_DOCTOR_REDIS_PASSWORD"
-}
-```
-
-The child `redis-cli` process receives the secret through `REDISCLI_AUTH`; raw stderr and authentication material are excluded from diagnostic evidence. Redis memory, persistence, and replica-link/lag conditions are evaluated without exposing keyspace data or individual replica addresses.
+Passwords stay out of JSON and process arguments; the child process receives the configured secret through `REDISCLI_AUTH` and diagnostic evidence excludes raw stderr/authentication material.
 
 ```bash
 erp-doctor plugin --config samples/redis-plugin.example.json
 ```
 
 See [`docs/redis-plugin.md`](docs/redis-plugin.md).
+
+### RabbitMQ (v0.14)
+
+`ErpDoctor.Plugin.RabbitMq` contributes:
+
+```text
+plugin.rabbitmq.overview
+plugin.rabbitmq.nodes
+plugin.rabbitmq.queues
+```
+
+It uses the RabbitMQ Management HTTP API with **GET-only** requests to overview, nodes, and a paginated queue list. Passwords are resolved from an environment variable and the Basic Authorization header is created only in memory.
+
+```powershell
+$env:ERP_DOCTOR_RABBITMQ_PASSWORD="your-secret"
+```
+
+```bash
+erp-doctor plugin --config samples/rabbitmq-plugin.example.json
+```
+
+Node checks treat down nodes, memory/disk alarms, and network partitions as Critical. Queue checks evaluate ready/unacknowledged backlog thresholds and can optionally warn on ready messages with zero consumers. Queue scans are bounded to one page with `maxQueues` hard-capped at 500.
+
+The provider does not export definitions, retrieve/requeue message payloads, publish, purge/delete queues, mutate topology/users/permissions/policies, or close connections. Failed HTTP response bodies and Authorization data are not copied into evidence.
+
+See [`docs/rabbitmq-plugin.md`](docs/rabbitmq-plugin.md).
 
 ### Docker
 
@@ -257,7 +263,7 @@ Every release runs restore → build → test → package. Dry runs additionally
 
 - self-contained Windows/Linux publish,
 - standalone Linux `--help`,
-- standalone loading of PostgreSQL (4), Docker (3), Nginx (3), and Redis (5) checks,
+- standalone loading of PostgreSQL (4), Docker (3), Nginx (3), Redis (5), and RabbitMQ (3) checks,
 - provider archive creation,
 - SHA256 verification.
 
@@ -273,8 +279,8 @@ Branch/manual dry runs cannot create a GitHub Release or publish NuGet; publishi
        Built-in checks                    PluginHost
              |                                 |
  System / SQL / HTTP / IIS / EventLog      PluginSdk DLLs
-             |                 /        /        |        |        \
-             |            Sample   PostgreSQL  Redis    Docker    Nginx
+             |              /       /        |        |       |        \
+             |         Sample  PostgreSQL  Redis  RabbitMQ  Docker   Nginx
              +----------------+----------------+
                               |
                        DiagnosticRunner
@@ -300,10 +306,11 @@ Current built-in/provider diagnostics follow these principles:
 6. Config drift never prints/hashes sensitive values.
 7. PostgreSQL provider never terminates/cancels backends.
 8. Redis provider never reads keys/values or changes Redis state/topology.
-9. Docker provider never changes container/engine state.
-10. Nginx provider never reloads/stops Nginx or dumps the full config.
-11. Permission/CLI failures become diagnostics instead of privilege escalation.
-12. Third-party plugins remain a separate executable-code trust boundary.
+9. RabbitMQ provider is GET-only and never publishes/purges/deletes/requeues messages or mutates broker topology/accounts.
+10. Docker provider never changes container/engine state.
+11. Nginx provider never reloads/stops Nginx or dumps the full config.
+12. Permission/CLI/API failures become diagnostics instead of privilege escalation.
+13. Third-party plugins remain a separate executable-code trust boundary.
 
 ## Roadmap
 
@@ -322,13 +329,14 @@ Completed:
 - [x] v0.11 Docker provider
 - [x] v0.12 Linux/Nginx provider
 - [x] v0.13 Redis provider
+- [x] v0.14 RabbitMQ provider
 
 Next:
 
-- [ ] RabbitMQ provider
 - [ ] Broader cross-platform system diagnostics
 - [ ] Installer UX based on release feedback
 - [ ] Optional machine-readable integration/MCP surface after provider feedback
+- [ ] Additional providers driven by real incidents/contributor demand
 
 ## Contributing
 
