@@ -1,8 +1,8 @@
 using System.Text.Json;
 using ErpDoctor.Core;
 using ErpDoctor.PluginHost;
-using ErpDoctor.SamplePlugin;
 using Xunit;
+using SamplePluginType = ErpDoctor.SamplePlugin.SamplePlugin;
 
 namespace ErpDoctor.Tests;
 
@@ -13,7 +13,7 @@ public sealed class PluginLoaderTests
     {
         var options = new PluginOptions
         {
-            Assemblies = [typeof(SamplePlugin).Assembly.Location]
+            Assemblies = [typeof(SamplePluginType).Assembly.Location]
         };
 
         var discovery = new PluginLoader().Load(options, Environment.CurrentDirectory);
@@ -94,7 +94,7 @@ public sealed class PluginLoaderTests
 
             var options = new PluginOptions
             {
-                Assemblies = [typeof(SamplePlugin).Assembly.Location],
+                Assemblies = [typeof(SamplePluginType).Assembly.Location],
                 Settings = new Dictionary<string, JsonElement>
                 {
                     ["SAMPLE"] = document.RootElement.Clone()
