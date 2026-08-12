@@ -25,6 +25,45 @@ internal static class ProgramEntry
         var htmlOutput = GetOption(args, "--html");
         var bundleOutput = GetOption(args, "--bundle");
         var historyPath = GetOption(args, "--history") ?? "erp-doctor-growth.json";
+        var leftConfigPath = GetOption(args, "--left");
+        var rightConfigPath = GetOption(args, "--right");
+        var ignorePrefixes = ParseIgnorePrefixes(GetOption(args, "--ignore"));
+
+        using var cts = new CancellationTokenSource();
+        Console.CancelKeyPress += (_, eventArgs) =>
+        {
+            eventArgs.Cancel = true;
+            cts.Cancel();
+        };
+
+        if (command.Equals("config-diff", StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.IsNullOrWhiteSpace(leftConfigPath) ||
+                string.IsNullOrWhiteSpace(rightConfigPath))
+            {
+                Console.Error.WriteLine("config-diff requires both --left <path> and --right <path>.");
+                return 2;
+            }
+
+            try
+            {
+                return await RunConfigDiffAsync(
+                    leftConfigPath,
+                    rightConfigPath,
+                    ignorePrefixes,
+                    cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                Console.Error.WriteLine("Configuration comparison cancelled.");
+                return 130;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+            {
+                Console.Error.WriteLine($"Could not compare configuration: {ex.Message}");
+                return 2;
+            }
+        }
 
         if (command.Equals("report", StringComparison.OrdinalIgnoreCase) &&
             string.IsNullOrWhiteSpace(jsonOutput) &&
@@ -49,13 +88,6 @@ internal static class ProgramEntry
             Console.Error.WriteLine($"Could not load config '{configPath}': {ex.Message}");
             return 2;
         }
-
-        using var cts = new CancellationTokenSource();
-        Console.CancelKeyPress += (_, eventArgs) =>
-        {
-            eventArgs.Cancel = true;
-            cts.Cancel();
-        };
 
         if (command.Equals("growth", StringComparison.OrdinalIgnoreCase))
         {
@@ -144,6 +176,28 @@ internal static class ProgramEntry
         return results.Any(x => x.Status is DiagnosticStatus.Critical or DiagnosticStatus.Error)
             ? 1
             : 0;
+    }
+
+    private static async Task<int> RunConfigDiffAsync(
+        string leftPath,
+        string rightPath,
+        IReadOnlyList<string> ignorePrefixes,
+        CancellationToken cancellationToken)
+    {
+        var leftFullPath = Path.GetFullPath(leftPath);
+        var rightFullPath = Path.GetFullPath(rightPath);
+        var leftJson = await File.ReadAllTextAsync(leftFullPath, cancellationToken);
+        var rightJson = await File.ReadAllTextAsync(rightFullPath, cancellationToken);
+
+        var report = JsonConfigDriftAnalyzer.Compare(
+            leftJson,
+            rightJson,
+            leftFullPath,
+            rightFullPath,
+            ignorePrefixes);
+
+        ConfigDriftConsoleReport.Write(report);
+        return report.Differences.Count == 0 ? 0 : 1;
     }
 
     private static async Task<int> RunGrowthAsync(
@@ -259,7 +313,10 @@ internal static class ProgramEntry
         value.Equals("--json", StringComparison.OrdinalIgnoreCase) ||
         value.Equals("--html", StringComparison.OrdinalIgnoreCase) ||
         value.Equals("--bundle", StringComparison.OrdinalIgnoreCase) ||
-        value.Equals("--history", StringComparison.OrdinalIgnoreCase);
+        value.Equals("--history", StringComparison.OrdinalIgnoreCase) ||
+        value.Equals("--left", StringComparison.OrdinalIgnoreCase) ||
+        value.Equals("--right", StringComparison.OrdinalIgnoreCase) ||
+        value.Equals("--ignore", StringComparison.OrdinalIgnoreCase);
 
     private static string? GetOption(string[] args, string name)
     {
@@ -274,6 +331,18 @@ internal static class ProgramEntry
         return null;
     }
 
+    private static IReadOnlyList<string> ParseIgnorePrefixes(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return Array.Empty<string>();
+        }
+
+        return value.Split(
+            [',', ';'],
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    }
+
     private static void PrintHelp()
     {
         Console.WriteLine("""
@@ -284,20 +353,22 @@ internal static class ProgramEntry
               erp-doctor report [--config erp-doctor.json] [--json report.json] [--html report.html]
               erp-doctor bundle [--config erp-doctor.json] [--bundle support.zip]
               erp-doctor growth [--config erp-doctor.json] [--history erp-doctor-growth.json]
+              erp-doctor config-diff --left appsettings.dev.json --right appsettings.prod.json [--ignore Logging,Serilog]
               erp-doctor system [--config erp-doctor.json]
               erp-doctor sql [--config erp-doctor.json]
               erp-doctor http [--config erp-doctor.json]
               erp-doctor iis [--config erp-doctor.json]
 
             Commands:
-              check   Run every configured diagnostic and correlate likely causes.
-              report  Run all checks and write a standalone HTML report by default.
-              bundle  Run all checks and write a sanitized ZIP support bundle by default.
-              growth  Capture SQL database/table size and compare it with the previous local snapshot.
-              system  Inspect disk, memory, runtime, and OS information.
-              sql     Inspect SQL Server connectivity, size, largest tables, blocking, and long requests.
-              http    Probe configured HTTP health endpoints.
-              iis     Inspect configured IIS application pools on Windows.
+              check        Run every configured diagnostic and correlate likely causes.
+              report       Run all checks and write a standalone HTML report by default.
+              bundle       Run all checks and write a sanitized ZIP support bundle by default.
+              growth       Capture SQL database/table size and compare it with the previous local snapshot.
+              config-diff  Compare two local JSON/appsettings files without printing secret values.
+              system       Inspect disk, memory, runtime, and OS information.
+              sql          Inspect SQL Server connectivity, size, largest tables, blocking, and long requests.
+              http         Probe configured HTTP health endpoints.
+              iis          Inspect configured IIS application pools on Windows.
 
             Output/state options:
               --json <path>     Write the stable machine-readable report schema as JSON.
@@ -305,11 +376,71 @@ internal static class ProgramEntry
               --bundle <path>   Write a sanitized ZIP with report.json, report.html, and manifest.json.
               --history <path>  Local JSON history used by the growth command.
 
+            Config drift options:
+              --left <path>     Left JSON/appsettings file.
+              --right <path>    Right JSON/appsettings file.
+              --ignore <paths>  Comma/semicolon-separated path prefixes to ignore.
+
+            Exit codes for config-diff:
+              0  No drift found.
+              1  Drift found.
+              2  Invalid arguments, unreadable file, or invalid JSON.
+
             Safety:
-              ERP Doctor v0.4 never writes to the ERP database. The growth command only writes
-              its own local history JSON file so future runs can calculate deltas.
+              ERP Doctor v0.5 never writes to the ERP database. Configuration comparison reads
+              local JSON only and redacts sensitive values before printing them.
             """);
     }
+}
+
+internal static class ConfigDriftConsoleReport
+{
+    public static void Write(ConfigDriftReport report)
+    {
+        Console.WriteLine();
+        Console.WriteLine("ERP Doctor - Configuration Drift");
+        Console.WriteLine(new string('─', 72));
+        Console.WriteLine($"Left  : {report.LeftLabel}");
+        Console.WriteLine($"Right : {report.RightLabel}");
+        Console.WriteLine($"Drift : {report.Differences.Count} difference(s)");
+
+        if (report.Differences.Count == 0)
+        {
+            Console.WriteLine();
+            Console.WriteLine("No configuration drift detected.");
+            return;
+        }
+
+        foreach (var difference in report.Differences)
+        {
+            Console.WriteLine();
+            Console.WriteLine($"{GetSymbol(difference.Kind)} {difference.Path} ({Describe(difference.Kind)})");
+            Console.WriteLine($"  left  : {difference.LeftValue}");
+            Console.WriteLine($"  right : {difference.RightValue}");
+            if (difference.IsSensitive)
+            {
+                Console.WriteLine("  note  : sensitive values are redacted; ERP Doctor does not hash or print them.");
+            }
+        }
+    }
+
+    private static string GetSymbol(ConfigDriftKind kind) => kind switch
+    {
+        ConfigDriftKind.Different => "~",
+        ConfigDriftKind.TypeChanged => "!",
+        ConfigDriftKind.MissingLeft => "+",
+        ConfigDriftKind.MissingRight => "-",
+        _ => "?"
+    };
+
+    private static string Describe(ConfigDriftKind kind) => kind switch
+    {
+        ConfigDriftKind.Different => "different",
+        ConfigDriftKind.TypeChanged => "type changed",
+        ConfigDriftKind.MissingLeft => "only on right",
+        ConfigDriftKind.MissingRight => "only on left",
+        _ => "unknown"
+    };
 }
 
 internal static class GrowthConsoleReport
