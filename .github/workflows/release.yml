@@ -11,7 +11,7 @@ on:
       version:
         description: "SemVer used for a packaging dry run (no release is created)"
         required: true
-        default: "0.15.0-dev.1"
+        default: "0.16.0-dev.1"
 
 permissions:
   contents: write
@@ -41,7 +41,7 @@ jobs:
           elif [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
             VERSION="$INPUT_VERSION"
           else
-            VERSION="0.15.0-dev.${GITHUB_RUN_NUMBER}"
+            VERSION="0.16.0-dev.${GITHUB_RUN_NUMBER}"
           fi
 
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
@@ -204,6 +204,38 @@ jobs:
           grep -F "checks   : 5" <<< "$PLUGIN_OUTPUT"
           grep -F "rabbitmq" <<< "$PLUGIN_OUTPUT"
           grep -F "RabbitMQ Diagnostics" <<< "$PLUGIN_OUTPUT"
+
+      - name: Smoke test standalone Linux network diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 -m http.server 18080 --bind 127.0.0.1 \
+            > artifacts/network-smoke-server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          sleep 1
+
+          cat > artifacts/network-smoke.json <<JSON
+          {
+            "network": {
+              "targets": [
+                {
+                  "name": "Loopback network smoke",
+                  "host": "127.0.0.1",
+                  "port": 18080,
+                  "timeoutSeconds": 5,
+                  "latencyWarningMs": 10000,
+                  "maxResolvedAddresses": 2
+                }
+              ]
+            }
+          }
+          JSON
+
+          NETWORK_OUTPUT="$(artifacts/linux-x64/ErpDoctor.Cli network --config artifacts/network-smoke.json)"
+          echo "$NETWORK_OUTPUT"
+          grep -F "Loopback network smoke" <<< "$NETWORK_OUTPUT"
 
       - name: Build release archives and checksums
         shell: bash
