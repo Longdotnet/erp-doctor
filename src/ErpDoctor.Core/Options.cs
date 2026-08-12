@@ -154,6 +154,12 @@ public sealed record SystemOptions
     public double DiskWarningFreePercent { get; init; } = 15;
     public double DiskCriticalFreePercent { get; init; } = 5;
     public double MemoryWarningAvailablePercent { get; init; } = 15;
+    public double CpuWarningPercent { get; init; } = 80;
+    public double CpuCriticalPercent { get; init; } = 95;
+    public int CpuSampleMilliseconds { get; init; } = 250;
+    public double LoadPerCpuWarning { get; init; } = 1.0;
+    public double LoadPerCpuCritical { get; init; } = 2.0;
+    public int TopProcessesLimit { get; init; } = 5;
 }
 
 internal static class EnvironmentExpander
