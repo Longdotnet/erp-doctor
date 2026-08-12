@@ -23,12 +23,19 @@ internal static class ProgramEntry
         var configPath = GetOption(args, "--config") ?? "erp-doctor.json";
         var jsonOutput = GetOption(args, "--json");
         var htmlOutput = GetOption(args, "--html");
+        var bundleOutput = GetOption(args, "--bundle");
 
         if (command.Equals("report", StringComparison.OrdinalIgnoreCase) &&
             string.IsNullOrWhiteSpace(jsonOutput) &&
             string.IsNullOrWhiteSpace(htmlOutput))
         {
             htmlOutput = "erp-doctor-report.html";
+        }
+
+        if (command.Equals("bundle", StringComparison.OrdinalIgnoreCase) &&
+            string.IsNullOrWhiteSpace(bundleOutput))
+        {
+            bundleOutput = "erp-doctor-support.zip";
         }
 
         ErpDoctorOptions options;
@@ -49,6 +56,7 @@ internal static class ProgramEntry
         {
             "check" => null,
             "report" => null,
+            "bundle" => null,
             "system" => "system",
             "sql" => "sql",
             "http" => "http",
@@ -82,7 +90,8 @@ internal static class ProgramEntry
         }
 
         var shouldDiagnose = command.Equals("check", StringComparison.OrdinalIgnoreCase) ||
-                             command.Equals("report", StringComparison.OrdinalIgnoreCase);
+                             command.Equals("report", StringComparison.OrdinalIgnoreCase) ||
+                             command.Equals("bundle", StringComparison.OrdinalIgnoreCase);
         var diagnoses = shouldDiagnose
             ? new DiagnosisEngine().Diagnose(results)
             : Array.Empty<Diagnosis>();
@@ -103,6 +112,14 @@ internal static class ProgramEntry
             var htmlPath = await WriteTextFileAsync(htmlOutput, html, cts.Token);
             Console.WriteLine();
             Console.WriteLine($"HTML report: {htmlPath}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(bundleOutput))
+        {
+            var bundlePath = await new SupportBundleBuilder()
+                .WriteAsync(report, bundleOutput, cts.Token);
+            Console.WriteLine();
+            Console.WriteLine($"Sanitized support bundle: {bundlePath}");
         }
 
         return results.Any(x => x.Status is DiagnosticStatus.Critical or DiagnosticStatus.Error)
@@ -195,7 +212,8 @@ internal static class ProgramEntry
     private static bool IsOptionWithValue(string value) =>
         value.Equals("--config", StringComparison.OrdinalIgnoreCase) ||
         value.Equals("--json", StringComparison.OrdinalIgnoreCase) ||
-        value.Equals("--html", StringComparison.OrdinalIgnoreCase);
+        value.Equals("--html", StringComparison.OrdinalIgnoreCase) ||
+        value.Equals("--bundle", StringComparison.OrdinalIgnoreCase);
 
     private static string? GetOption(string[] args, string name)
     {
@@ -216,8 +234,9 @@ internal static class ProgramEntry
             ERP Doctor - read-only diagnostics for boring enterprise applications.
 
             Usage:
-              erp-doctor check [--config erp-doctor.json] [--json report.json] [--html report.html]
+              erp-doctor check [--config erp-doctor.json] [--json report.json] [--html report.html] [--bundle support.zip]
               erp-doctor report [--config erp-doctor.json] [--json report.json] [--html report.html]
+              erp-doctor bundle [--config erp-doctor.json] [--bundle support.zip]
               erp-doctor system [--config erp-doctor.json]
               erp-doctor sql [--config erp-doctor.json]
               erp-doctor http [--config erp-doctor.json]
@@ -226,18 +245,20 @@ internal static class ProgramEntry
             Commands:
               check   Run every configured diagnostic and correlate likely causes.
               report  Run all checks and write a standalone HTML report by default.
+              bundle  Run all checks and write a sanitized ZIP support bundle by default.
               system  Inspect disk, memory, runtime, and OS information.
               sql     Inspect SQL Server connectivity, size, largest tables, blocking, and long requests.
               http    Probe configured HTTP health endpoints.
               iis     Inspect configured IIS application pools on Windows.
 
             Report output:
-              --json <path>   Write the stable machine-readable report schema as JSON.
-              --html <path>   Write a standalone, dependency-free HTML diagnostic report.
+              --json <path>     Write the stable machine-readable report schema as JSON.
+              --html <path>     Write a standalone, dependency-free HTML diagnostic report.
+              --bundle <path>   Write a sanitized ZIP with report.json, report.html, and manifest.json.
 
             Safety:
-              ERP Doctor v0.2 is read-only. It does not restart IIS, kill SQL sessions,
-              shrink databases, delete logs, or modify ERP data.
+              ERP Doctor v0.3 is read-only. Support bundles redact secret-like evidence before
+              serialization and do not include the source configuration file.
             """);
     }
 }

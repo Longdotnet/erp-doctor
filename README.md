@@ -16,7 +16,7 @@ Instead of opening SSMS, IIS Manager, Event Viewer, Task Manager, and a browser 
 erp-doctor check
 ```
 
-## What v0.2 checks
+## What v0.3 checks
 
 - Fixed-disk free space
 - System memory
@@ -29,6 +29,7 @@ erp-doctor check
 - HTTP endpoint status and latency
 - IIS application-pool state
 - Cross-check correlation for likely root causes
+- Sanitized support-bundle export for support handoff
 
 ERP Doctor is intentionally **read-only**. It does not kill SQL sessions, shrink databases, restart IIS, delete logs, or update ERP data.
 
@@ -132,7 +133,35 @@ dotnet run --project src/ErpDoctor.Cli -- check \
   --html report.html
 ```
 
-The JSON export now uses a stable report envelope containing a schema version, generated timestamp, overall status, health score, summary counts, raw diagnostic results, and correlated diagnoses. See [`docs/report-schema.md`](docs/report-schema.md) for the contract and scoring rules.
+The JSON export uses a stable report envelope containing a schema version, generated timestamp, overall status, health score, summary counts, raw diagnostic results, and correlated diagnoses. See [`docs/report-schema.md`](docs/report-schema.md) for the contract and scoring rules.
+
+## Sanitized support bundle
+
+Generate one ZIP for a support handoff:
+
+```bash
+dotnet run --project src/ErpDoctor.Cli -- bundle --config erp-doctor.json
+```
+
+The default output is `erp-doctor-support.zip`. You can also generate it while running `check`:
+
+```bash
+dotnet run --project src/ErpDoctor.Cli -- check \
+  --config erp-doctor.json \
+  --bundle artifacts/customer-a.support.zip
+```
+
+Every support bundle contains:
+
+```text
+report.json
+report.html
+manifest.json
+```
+
+ERP Doctor sanitizes secret-like evidence **before** JSON serialization and HTML rendering. It never copies the source configuration file into the bundle. Host names, database names, URLs, table names, machine information, and other troubleshooting evidence can still remain, so review a bundle before sending it outside your organization.
+
+See [`docs/support-bundle.md`](docs/support-bundle.md) for the sanitization boundary and file contract.
 
 ## Configuration
 
@@ -180,11 +209,15 @@ See [`samples/erp-doctor.example.json`](samples/erp-doctor.example.json).
                          |
                   DiagnosticReport
                          |
-          +--------------+--------------+
-          |              |              |
-       Console          JSON      ErpDoctor.Reporting
-                                         |
-                                        HTML
+          +--------------+----------------------+
+          |              |                      |
+       Console          JSON            ErpDoctor.Reporting
+                                             |       |
+                                            HTML   Sanitizer
+                                                     |
+                                               Support Bundle
+                                                     |
+                                      report.json / report.html / manifest.json
 ```
 
 Every diagnostic implements the small `IDiagnosticCheck` contract. The core does not know about SQL Server, IIS, or HTTP, so future providers can be added without turning the CLI into one giant script.
@@ -194,6 +227,7 @@ Every diagnostic implements the small `IDiagnosticCheck` contract. The core does
 ```text
 erp-doctor check
 erp-doctor report
+erp-doctor bundle
 erp-doctor system
 erp-doctor sql
 erp-doctor http
@@ -206,6 +240,7 @@ Common options:
 --config <path>   JSON configuration file
 --json <path>     Export the stable diagnostic report as JSON
 --html <path>     Export a standalone HTML diagnostic report
+--bundle <path>   Export a sanitized support ZIP
 --help            Show help
 ```
 
@@ -213,14 +248,16 @@ Common options:
 
 Production support tools should be boring and predictable.
 
-ERP Doctor v0.2 follows these rules:
+ERP Doctor v0.3 follows these rules:
 
 1. Diagnostics are read-only.
 2. No automatic database repair or shrink.
 3. No automatic SQL session kill.
 4. No automatic IIS restart.
 5. Configuration supports environment-variable secrets.
-6. A diagnosis is presented as evidence-backed guidance, not absolute certainty.
+6. Support bundles sanitize secret-like report data before writing output.
+7. The source configuration file is not included in support bundles.
+8. A diagnosis is presented as evidence-backed guidance, not absolute certainty.
 
 Some SQL dynamic management views require additional SQL Server permissions. If a check cannot run, ERP Doctor reports the check as an error instead of attempting privilege escalation.
 
@@ -244,8 +281,14 @@ Some SQL dynamic management views require additional SQL Server permissions. If 
 - [x] `erp-doctor report` command
 - [x] Report tests
 
+### v0.3
+- [x] `erp-doctor bundle` command
+- [x] Sanitized report copy before serialization
+- [x] ZIP with JSON, HTML, and manifest
+- [x] Secret-like evidence redaction
+- [x] Support-bundle regression tests
+
 ### Next
-- [ ] Sanitized support bundle
 - [ ] Database growth history
 - [ ] Configuration drift comparison
 - [ ] IIS site/binding diagnostics
