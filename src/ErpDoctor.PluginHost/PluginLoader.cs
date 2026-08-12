@@ -248,16 +248,14 @@ public sealed class PluginLoader
 
     private static Assembly LoadAssembly(string assemblyPath)
     {
+        var requestedAssemblyName = AssemblyName.GetAssemblyName(assemblyPath);
         var existing = AppDomain.CurrentDomain.GetAssemblies()
             .FirstOrDefault(assembly =>
                 !assembly.IsDynamic &&
-                !string.IsNullOrWhiteSpace(assembly.Location) &&
                 string.Equals(
-                    Path.GetFullPath(assembly.Location),
-                    assemblyPath,
-                    OperatingSystem.IsWindows()
-                        ? StringComparison.OrdinalIgnoreCase
-                        : StringComparison.Ordinal));
+                    assembly.GetName().FullName,
+                    requestedAssemblyName.FullName,
+                    StringComparison.Ordinal));
 
         if (existing is not null)
         {

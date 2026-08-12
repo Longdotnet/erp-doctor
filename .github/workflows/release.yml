@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - "v*.*.*"
+    branches:
+      - "agent/release-dry-run-*"
   workflow_dispatch:
     inputs:
       version:
@@ -34,10 +36,12 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF_TYPE" == "tag" ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
-          else
+          elif [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
             VERSION="$INPUT_VERSION"
+          else
+            VERSION="0.10.0-dev.${GITHUB_RUN_NUMBER}"
           fi
 
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
@@ -118,6 +122,30 @@ jobs:
           cp samples/postgres-plugin.example.json artifacts/postgres-plugin/postgres-plugin.example.json
           cp LICENSE artifacts/postgres-plugin/LICENSE
 
+      - name: Smoke test standalone Linux build and plugin loading
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x artifacts/linux-x64/ErpDoctor.Cli
+
+          artifacts/linux-x64/ErpDoctor.Cli --help > /dev/null
+
+          cat > artifacts/plugin-smoke.json <<JSON
+          {
+            "plugins": {
+              "assemblies": [
+                "$GITHUB_WORKSPACE/artifacts/postgres-plugin/ErpDoctor.Plugin.Postgres.dll"
+              ],
+              "settings": {}
+            }
+          }
+          JSON
+
+          PLUGIN_OUTPUT="$(artifacts/linux-x64/ErpDoctor.Cli plugins --config artifacts/plugin-smoke.json)"
+          echo "$PLUGIN_OUTPUT"
+          grep -F "postgres" <<< "$PLUGIN_OUTPUT"
+          grep -F "checks   : 4" <<< "$PLUGIN_OUTPUT"
+
       - name: Build release archives and checksums
         shell: bash
         run: |
@@ -153,6 +181,13 @@ jobs:
               *.nupkg > checksums.txt
           )
 
+      - name: Verify release checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd artifacts/release
+          sha256sum -c checksums.txt
+
       - name: Upload packaged release artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -161,7 +196,7 @@ jobs:
           if-no-files-found: error
 
       - name: Create GitHub release
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -174,7 +209,7 @@ jobs:
             --title "ERP Doctor $GITHUB_REF_NAME"
 
       - name: Publish NuGet packages when API key is configured
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         shell: bash
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
