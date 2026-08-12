@@ -1,0 +1,22 @@
+{
+  "plugins": {
+    "assemblies": [
+      "plugins/ErpDoctor.Plugin.RabbitMq/bin/Release/net8.0/ErpDoctor.Plugin.RabbitMq.dll"
+    ],
+    "settings": {
+      "rabbitmq": {
+        "baseUrl": "http://127.0.0.1:15672",
+        "username": "erp-doctor",
+        "passwordEnvironmentVariable": "ERP_DOCTOR_RABBITMQ_PASSWORD",
+        "requestTimeoutSeconds": 10,
+        "maxQueues": 100,
+        "readyMessagesWarning": 1000,
+        "readyMessagesCritical": 10000,
+        "unackedMessagesWarning": 500,
+        "unackedMessagesCritical": 5000,
+        "warnOnNoConsumersWithReadyMessages": false,
+        "maxQueueEvidence": 10
+      }
+    }
+  }
+}
