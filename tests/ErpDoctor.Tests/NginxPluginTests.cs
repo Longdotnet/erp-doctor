@@ -96,7 +96,8 @@ public sealed class NginxPluginTests
         Assert.Equal(1.5d, snapshot.Load5, 6);
         Assert.Equal(1d, snapshot.Load15, 6);
         Assert.Equal(4, snapshot.ProcessorCount);
-        Assert.Equal(50d, snapshot.MemoryAvailablePercent, 6);
+        Assert.True(snapshot.MemoryAvailablePercent.HasValue);
+        Assert.Equal(50d, snapshot.MemoryAvailablePercent.GetValueOrDefault(), 6);
     }
 
     [Fact]
