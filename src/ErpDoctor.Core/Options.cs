@@ -81,6 +81,14 @@ public sealed record HttpEndpointOptions
 public sealed record IisOptions
 {
     public IReadOnlyList<string> AppPools { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<IisSiteOptions> Sites { get; init; } = Array.Empty<IisSiteOptions>();
+}
+
+public sealed record IisSiteOptions
+{
+    public string Name { get; init; } = "IIS site";
+    public IReadOnlyList<string> ExpectedBindings { get; init; } = Array.Empty<string>();
+    public bool CheckPhysicalPath { get; init; } = true;
 }
 
 public sealed record SystemOptions
