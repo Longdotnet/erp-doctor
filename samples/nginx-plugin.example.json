@@ -1,0 +1,16 @@
+{
+  "plugins": {
+    "assemblies": [
+      "plugins/ErpDoctor.Plugin.Nginx/bin/Release/net8.0/ErpDoctor.Plugin.Nginx.dll"
+    ],
+    "settings": {
+      "nginx": {
+        "nginxExecutable": "nginx",
+        "configPath": "/etc/nginx/nginx.conf",
+        "commandTimeoutSeconds": 10,
+        "loadPerCpuWarning": 1.0,
+        "loadPerCpuCritical": 2.0
+      }
+    }
+  }
+}
