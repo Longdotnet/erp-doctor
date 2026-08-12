@@ -47,6 +47,31 @@ public sealed class DiagnosisEngineTests
             diagnosis => diagnosis.Title.Contains("blocking", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public void Diagnose_CorrelatesCpuPressureWithSlowHttp()
+    {
+        var results = new[]
+        {
+            new DiagnosticResult(
+                "system.cpu",
+                "System CPU",
+                DiagnosticStatus.Critical,
+                "CPU utilization is 97.0%."),
+            new DiagnosticResult(
+                "http.erp-api",
+                "ERP API",
+                DiagnosticStatus.Warning,
+                "HTTP 200 in 2400 ms",
+                new Dictionary<string, string> { ["latencyMs"] = "2400" })
+        };
+
+        var diagnoses = new DiagnosisEngine().Diagnose(results);
+
+        Assert.Contains(
+            diagnoses,
+            diagnosis => diagnosis.Title.Contains("CPU pressure", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static DiagnosticResult Result(
         string id,
         DiagnosticStatus status,
