@@ -76,54 +76,66 @@ public static class JsonConfigDriftAnalyzer
 
             if (!hasLeft)
             {
-                var sensitive = right!.Sensitive || IsSensitivePath(path);
+                var rightNode = right
+                    ?? throw new InvalidOperationException($"Missing right config node for path '{path}'.");
+                var sensitive = rightNode.Sensitive || IsSensitivePath(path);
                 candidates.Add(new DriftCandidate(
                     new ConfigDriftEntry(
                         path,
                         ConfigDriftKind.MissingLeft,
                         MissingValue,
-                        Display(right, sensitive),
+                        Display(rightNode, sensitive),
                         sensitive),
-                    IsContainer(right.Kind)));
+                    IsContainer(rightNode.Kind)));
                 continue;
             }
 
             if (!hasRight)
             {
-                var sensitive = left!.Sensitive || IsSensitivePath(path);
+                var leftNode = left
+                    ?? throw new InvalidOperationException($"Missing left config node for path '{path}'.");
+                var sensitive = leftNode.Sensitive || IsSensitivePath(path);
                 candidates.Add(new DriftCandidate(
                     new ConfigDriftEntry(
                         path,
                         ConfigDriftKind.MissingRight,
-                        Display(left, sensitive),
+                        Display(leftNode, sensitive),
                         MissingValue,
                         sensitive),
-                    IsContainer(left.Kind)));
+                    IsContainer(leftNode.Kind)));
                 continue;
             }
 
-            var isSensitive = left!.Sensitive || right!.Sensitive || IsSensitivePath(path);
-            if (left.Kind != right.Kind)
+            var requiredLeft = left
+                ?? throw new InvalidOperationException($"Missing left config node for path '{path}'.");
+            var requiredRight = right
+                ?? throw new InvalidOperationException($"Missing right config node for path '{path}'.");
+            var isSensitive = requiredLeft.Sensitive || requiredRight.Sensitive || IsSensitivePath(path);
+
+            if (requiredLeft.Kind != requiredRight.Kind)
             {
                 candidates.Add(new DriftCandidate(
                     new ConfigDriftEntry(
                         path,
                         ConfigDriftKind.TypeChanged,
-                        Display(left, isSensitive),
-                        Display(right, isSensitive),
+                        Display(requiredLeft, isSensitive),
+                        Display(requiredRight, isSensitive),
                         isSensitive),
                     SuppressesDescendants: true));
                 continue;
             }
 
-            if (!string.Equals(left.ComparableValue, right.ComparableValue, StringComparison.Ordinal))
+            if (!string.Equals(
+                    requiredLeft.ComparableValue,
+                    requiredRight.ComparableValue,
+                    StringComparison.Ordinal))
             {
                 candidates.Add(new DriftCandidate(
                     new ConfigDriftEntry(
                         path,
                         ConfigDriftKind.Different,
-                        Display(left, isSensitive),
-                        Display(right, isSensitive),
+                        Display(requiredLeft, isSensitive),
+                        Display(requiredRight, isSensitive),
                         isSensitive),
                     SuppressesDescendants: false));
             }
