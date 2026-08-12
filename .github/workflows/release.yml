@@ -122,6 +122,30 @@ jobs:
           cp samples/postgres-plugin.example.json artifacts/postgres-plugin/postgres-plugin.example.json
           cp LICENSE artifacts/postgres-plugin/LICENSE
 
+      - name: Smoke test standalone Linux build and plugin loading
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x artifacts/linux-x64/ErpDoctor.Cli
+
+          artifacts/linux-x64/ErpDoctor.Cli --help > /dev/null
+
+          cat > artifacts/plugin-smoke.json <<JSON
+          {
+            "plugins": {
+              "assemblies": [
+                "$GITHUB_WORKSPACE/artifacts/postgres-plugin/ErpDoctor.Plugin.Postgres.dll"
+              ],
+              "settings": {}
+            }
+          }
+          JSON
+
+          PLUGIN_OUTPUT="$(artifacts/linux-x64/ErpDoctor.Cli plugins --config artifacts/plugin-smoke.json)"
+          echo "$PLUGIN_OUTPUT"
+          grep -F "postgres" <<< "$PLUGIN_OUTPUT"
+          grep -F "checks   : 4" <<< "$PLUGIN_OUTPUT"
+
       - name: Build release archives and checksums
         shell: bash
         run: |
@@ -156,6 +180,13 @@ jobs:
               erp-doctor-plugin-postgres.zip \
               *.nupkg > checksums.txt
           )
+
+      - name: Verify release checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd artifacts/release
+          sha256sum -c checksums.txt
 
       - name: Upload packaged release artifacts
         uses: actions/upload-artifact@v7
