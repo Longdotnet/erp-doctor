@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4.svg)](https://dotnet.microsoft.com/)
 
-ERP Doctor is an open-source, evidence-first diagnostic CLI for the infrastructure small ERP teams end up owning all at once: **Windows, Linux, IIS, Nginx, .NET APIs, SQL Server, PostgreSQL, Redis, RabbitMQ, Docker, HTTP endpoints, DNS/TCP dependencies, Event Log, disks, memory, and environment configuration**.
+ERP Doctor is an open-source, evidence-first diagnostic CLI for the infrastructure small ERP teams end up owning all at once: **Windows/Linux hosts, IIS/Nginx, .NET APIs, SQL Server, PostgreSQL, Redis, RabbitMQ, Docker, DNS/TCP dependencies, Event Log, disks, memory, CPU/load pressure, and environment configuration**.
 
 ```text
 CHECK -> COLLECT EVIDENCE -> CORRELATE -> DIAGNOSE -> RECOMMEND
@@ -20,25 +20,25 @@ erp-doctor check
 
 ## Why ERP Doctor?
 
-An endpoint can tell you an API is down. It usually cannot tell you whether the real issue is a stopped AppPool, DNS failure, closed TCP port, Linux load pressure, invalid Nginx config, disk pressure, SQL blocking, Redis memory pressure, a RabbitMQ node alarm or queue backlog, an unhealthy container, config drift, or a failed .NET startup.
+A health endpoint can tell you an API is down. It usually cannot tell you whether the immediate failure boundary is a stopped AppPool, DNS failure, closed TCP port, host CPU pressure, Linux load, low disk, SQL blocking, Redis memory pressure, a RabbitMQ alarm/backlog, an unhealthy container, config drift, invalid Nginx config, or a failed .NET startup.
 
-ERP Doctor keeps those signals in one run so support/developers can reason about the **whole system**, not one component at a time.
+ERP Doctor keeps those signals in one run so developers/support can reason about the **whole system** instead of checking each component manually.
 
 ## What it can inspect
 
 | Area | Diagnostics |
 | --- | --- |
-| System | Fixed-disk free space, memory, .NET runtime, OS |
+| System | Fixed-disk space, memory, .NET/OS, Windows/Linux CPU, Linux load average, bounded top-process working sets |
 | Network | Cross-platform DNS resolution and TCP reachability/latency for explicitly configured dependencies |
 | SQL Server | Connectivity, data/log size, largest tables, blocking, long-running requests |
 | SQL growth | Local historical snapshots, size deltas, MB/day, table/row growth |
 | PostgreSQL plugin | Connectivity, database size, long-running queries, blocking sessions |
 | Redis plugin | Connectivity, server metadata, memory pressure, persistence, replication health |
-| RabbitMQ plugin | Management API overview, node resource alarms/partitions, queue backlog/unacked/consumer health |
+| RabbitMQ plugin | Management overview, node alarms/partitions, queue backlog/unacked/consumer health |
 | Docker plugin | Engine reachability/version, engine summary, container state/health, expected containers |
-| Linux/Nginx plugin | Linux uptime/load/memory snapshot, Nginx version, config validation |
+| Nginx plugin | Nginx version and configuration validation |
 | IIS | AppPool state, site state, bindings, root physical path |
-| HTTP | Expected status code, timeout, latency threshold |
+| HTTP | Expected status, timeout, latency threshold |
 | Windows Event Log | Recent Critical/Error entries, optional Warning/provider filters |
 | Configuration | Secret-safe JSON/appsettings drift between environments |
 | Reporting | Console, stable JSON, standalone HTML |
@@ -49,11 +49,11 @@ ERP Doctor keeps those signals in one run so support/developers can reason about
 
 ERP Doctor supports source/global-tool workflows plus checksum-verified self-contained installers for **Windows x64** and **Linux x64**.
 
-### Checksum-verified self-contained installer (v0.15)
+### Self-contained installer
 
-The installer scripts download a platform release archive and `checksums.txt`, verify SHA256 **before extraction**, then install the self-contained binary. A .NET SDK/runtime is not required on the target machine.
+The installer scripts consume a platform release archive and `checksums.txt`, verify SHA256 **before extraction**, then install the self-contained binary. A .NET SDK/runtime is not required on the target machine.
 
-The first public GitHub Release has not been created yet. After a release exists, download/review the matching `install.ps1` or `install.sh` release asset and run it.
+The first public GitHub Release has **not** been created yet. After a release exists, download/review the matching `install.ps1` or `install.sh` release asset and run it.
 
 Windows PowerShell / PowerShell 7:
 
@@ -67,26 +67,14 @@ Linux:
 bash install.sh
 ```
 
-Specific version:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\install.ps1 -Version v0.15.0
-```
-
-```bash
-bash install.sh --version v0.15.0
-```
-
-Defaults:
+Default locations:
 
 ```text
 Windows: %LOCALAPPDATA%\Programs\erp-doctor
 Linux:   ~/.local/bin
 ```
 
-Windows updates the current user's PATH unless `-NoPathUpdate` is supplied. Linux deliberately does not edit shell startup files.
-
-Both scripts also accept local archive/checksum paths for offline use and CI. Windows CI verifies that a deliberately wrong checksum is rejected; release dry-runs install and execute the packaged Linux binary.
+Windows updates the current user's PATH unless `-NoPathUpdate` is supplied. Linux deliberately does not edit shell startup files. Both scripts also accept local archive/checksum paths for offline use and deterministic CI.
 
 See [`docs/installing.md`](docs/installing.md).
 
@@ -99,58 +87,35 @@ dotnet restore
 dotnet build ErpDoctor.sln
 ```
 
-Run directly:
-
 ```bash
 dotnet run --project src/ErpDoctor.Cli -- check --config erp-doctor.json
 ```
 
 ### .NET global tool
 
-ERP Doctor is packaged as `ErpDoctor.Tool`. CI installs the packed tool into a clean temporary path and runs `erp-doctor --help` on every change.
+ERP Doctor is packaged as `ErpDoctor.Tool`. CI packs and installs the tool into a clean temporary path on every change.
 
-When the package is published to NuGet.org:
+When published to NuGet.org:
 
 ```bash
 dotnet tool install --global ErpDoctor.Tool
 ```
 
-### Release assets
-
-The release pipeline is validated to create:
-
-```text
-erp-doctor-win-x64.zip
-erp-doctor-linux-x64.tar.gz
-erp-doctor-plugin-postgres.zip
-erp-doctor-plugin-docker.zip
-erp-doctor-plugin-nginx.zip
-erp-doctor-plugin-redis.zip
-erp-doctor-plugin-rabbitmq.zip
-install.ps1
-install.sh
-ErpDoctor.Tool.<version>.nupkg
-ErpDoctor.PluginSdk.<version>.nupkg
-checksums.txt
-```
-
-Windows/Linux archives are self-contained; provider plugins are separate trust/install boundaries. Every distributed archive/package/installer is covered by `checksums.txt`. See [`docs/releasing.md`](docs/releasing.md).
-
 ## First run
 
-Copy the default config:
+Copy the example config:
 
 ```powershell
 Copy-Item samples/erp-doctor.example.json erp-doctor.json
 ```
 
-Keep SQL Server credentials out of JSON:
+Keep credentials out of JSON. For SQL Server, for example:
 
 ```powershell
 $env:ERP_DB="Server=localhost;Database=ERP;Integrated Security=True;TrustServerCertificate=True"
 ```
 
-Run configured diagnostics:
+Then run:
 
 ```bash
 erp-doctor check --config erp-doctor.json
@@ -160,7 +125,7 @@ erp-doctor check --config erp-doctor.json
 
 ```text
 erp-doctor check        Run all configured built-in + plugin diagnostics
-erp-doctor system       System diagnostics only
+erp-doctor system       Host disk/memory/CPU/load/process diagnostics
 erp-doctor network      DNS + TCP diagnostics only
 erp-doctor sql          SQL Server diagnostics only
 erp-doctor http         HTTP endpoint diagnostics only
@@ -176,9 +141,49 @@ erp-doctor plugins      Discover configured plugins without running checks
 erp-doctor plugin       Run contributed plugin checks only
 ```
 
-## Network Doctor
+## System Doctor (v0.17)
 
-Configure explicit dependency targets and ERP Doctor will run a DNS check plus a TCP-connectivity check for each target:
+```bash
+erp-doctor system --config erp-doctor.json
+```
+
+Built-in host pressure now includes:
+
+```text
+system.cpu        Aggregate CPU utilization (Windows + Linux)
+system.load       Linux 1/5/15-minute load average normalized per CPU
+system.processes  Bounded top processes by working-set memory
+```
+
+Example thresholds:
+
+```json
+{
+  "system": {
+    "diskWarningFreePercent": 15,
+    "diskCriticalFreePercent": 5,
+    "memoryWarningAvailablePercent": 15,
+    "cpuWarningPercent": 80,
+    "cpuCriticalPercent": 95,
+    "cpuSampleMilliseconds": 250,
+    "loadPerCpuWarning": 1.0,
+    "loadPerCpuCritical": 2.0,
+    "topProcessesLimit": 5
+  }
+}
+```
+
+CPU sampling uses `GetSystemTimes` on Windows and `/proc/stat` on Linux. Linux load uses `/proc/loadavg`. No `top`, `ps`, WMI shell command, or external monitoring dependency is required.
+
+The process snapshot intentionally retains only **PID + process name + working-set MB**. ERP Doctor does not collect process command lines, environment variables, memory contents, or open-file contents.
+
+When host CPU is elevated while an HTTP endpoint is slow, the diagnosis engine can surface CPU pressure as a possible contributing factor. It remains correlation, not proof, and recommendations explicitly ask for sustained/repeated evidence before remediation.
+
+See [`docs/system-pressure.md`](docs/system-pressure.md).
+
+## Network Doctor (v0.16)
+
+Each configured network target contributes a DNS check plus a TCP-connectivity check:
 
 ```json
 {
@@ -201,9 +206,9 @@ Configure explicit dependency targets and ERP Doctor will run a DNS check plus a
 erp-doctor network --config erp-doctor.json
 ```
 
-Network Doctor uses .NET DNS/TCP APIs directly, not shell tools. It does not scan neighboring hosts/ports, send application payloads, change DNS/firewall/routing, or copy raw socket exception messages into evidence.
+Network Doctor uses .NET DNS/TCP APIs directly. It does not discover neighboring hosts, scan ports, send application payloads, modify DNS/firewall/routing, or copy raw socket exceptions into evidence.
 
-When an HTTP endpoint is Critical and its matching host/port TCP check is also Critical, the diagnosis engine can surface the network/listener layer as the likely failure boundary before suggesting application-level debugging.
+If an HTTP endpoint is unavailable and the matching host/port TCP check also fails, ERP Doctor can correlate the outage below the HTTP application layer.
 
 See [`docs/network-diagnostics.md`](docs/network-diagnostics.md).
 
@@ -216,74 +221,6 @@ erp-doctor growth --config erp-doctor.json
 Later snapshots can show data/log/total deltas, MB/day rate, and table/row growth. History is local ERP Doctor state: no SQL history table, trigger, stored procedure, or Agent job is created.
 
 See [`docs/database-growth.md`](docs/database-growth.md).
-
-## Provider plugins
-
-Provider dependencies stay outside Core and are loaded only from explicit local DLL paths.
-
-### PostgreSQL
-
-`ErpDoctor.Plugin.Postgres` contributes connectivity, database-size, long-running-query, and blocking checks. The connection string comes from an environment variable; SQL text from `pg_stat_activity` is excluded from evidence. The provider never terminates/cancels backends.
-
-```bash
-erp-doctor plugin --config samples/postgres-plugin.example.json
-```
-
-See [`docs/postgres-plugin.md`](docs/postgres-plugin.md).
-
-### Redis
-
-`ErpDoctor.Plugin.Redis` uses `redis-cli` with fixed argument lists and only executes `PING` plus selected `INFO` sections. It does **not** inspect keys/values or run `KEYS`, `SCAN`, `GET`, `CONFIG`, or `MONITOR`.
-
-Passwords stay out of JSON and process arguments; the child process receives the configured secret through `REDISCLI_AUTH` and diagnostic evidence excludes raw stderr/authentication material.
-
-```bash
-erp-doctor plugin --config samples/redis-plugin.example.json
-```
-
-See [`docs/redis-plugin.md`](docs/redis-plugin.md).
-
-### RabbitMQ
-
-`ErpDoctor.Plugin.RabbitMq` contributes:
-
-```text
-plugin.rabbitmq.overview
-plugin.rabbitmq.nodes
-plugin.rabbitmq.queues
-```
-
-It uses the RabbitMQ Management HTTP API with **GET-only** requests to overview, nodes, and a paginated queue list. Passwords are resolved from an environment variable and the Basic Authorization header is created only in memory.
-
-Node checks treat down nodes, memory/disk alarms, and network partitions as Critical. Queue checks evaluate ready/unacknowledged backlog thresholds and can optionally warn on ready messages with zero consumers. Queue scans are bounded to one page with `maxQueues` hard-capped at 500.
-
-The provider does not export definitions, retrieve/requeue message payloads, publish, purge/delete queues, mutate topology/users/permissions/policies, or close connections.
-
-```bash
-erp-doctor plugin --config samples/rabbitmq-plugin.example.json
-```
-
-See [`docs/rabbitmq-plugin.md`](docs/rabbitmq-plugin.md).
-
-### Docker
-
-`ErpDoctor.Plugin.Docker` uses fixed Docker CLI arguments without invoking a shell and never starts/stops/restarts/removes containers. Container evidence is limited to **name/state/health**; env vars, labels, commands, mounts, and raw stderr are excluded.
-
-```bash
-erp-doctor plugin --config samples/docker-plugin.example.json
-```
-
-See [`docs/docker-plugin.md`](docs/docker-plugin.md).
-
-### Linux / Nginx
-
-`ErpDoctor.Plugin.Nginx` reads Linux runtime evidence from `/etc/os-release` and `/proc`, then uses only bounded Nginx version/config validation commands. It never dumps the full Nginx config and never reloads/stops Nginx.
-
-```bash
-erp-doctor plugin --config samples/nginx-plugin.example.json
-```
-
-See [`docs/nginx-plugin.md`](docs/nginx-plugin.md).
 
 ## Configuration drift
 
@@ -305,9 +242,72 @@ erp-doctor report --config erp-doctor.json
 erp-doctor bundle --config erp-doctor.json
 ```
 
-Secret-like report evidence is sanitized before serialization. Operational identifiers may remain, so bundles should still be reviewed before sharing outside the organization.
+Secret-like report evidence is sanitized before serialization. Operational identifiers can remain, so bundles should still be reviewed before sharing outside the organization.
 
 See [`docs/report-schema.md`](docs/report-schema.md) and [`docs/support-bundle.md`](docs/support-bundle.md).
+
+## Provider plugins
+
+Provider dependencies stay outside Core and are loaded only from explicit local DLL paths.
+
+### PostgreSQL
+
+`ErpDoctor.Plugin.Postgres` contributes connectivity, database-size, long-running-query, and blocking checks. SQL text from `pg_stat_activity` is excluded from evidence; the provider never terminates/cancels backends.
+
+```bash
+erp-doctor plugin --config samples/postgres-plugin.example.json
+```
+
+See [`docs/postgres-plugin.md`](docs/postgres-plugin.md).
+
+### Docker
+
+`ErpDoctor.Plugin.Docker` uses fixed Docker CLI arguments without invoking a shell and never starts/stops/restarts/removes containers. Evidence is limited to bounded engine/container health metadata.
+
+```bash
+erp-doctor plugin --config samples/docker-plugin.example.json
+```
+
+See [`docs/docker-plugin.md`](docs/docker-plugin.md).
+
+### Nginx
+
+Starting in v0.17, generic Linux host pressure belongs to built-in System Doctor. `ErpDoctor.Plugin.Nginx` now contributes only:
+
+```text
+plugin.nginx.version
+plugin.nginx.config
+```
+
+It uses bounded version/config-validation commands, never `nginx -T`, and never reloads/stops Nginx.
+
+```bash
+erp-doctor plugin --config samples/nginx-plugin.example.json
+```
+
+See [`docs/nginx-plugin.md`](docs/nginx-plugin.md).
+
+### Redis
+
+`ErpDoctor.Plugin.Redis` uses fixed `redis-cli` arguments and only executes `PING` plus selected `INFO` sections. It does **not** inspect keys/values or run `KEYS`, `SCAN`, `GET`, `CONFIG`, or `MONITOR`.
+
+Passwords stay out of JSON/process arguments and are passed to the child process through `REDISCLI_AUTH`.
+
+```bash
+erp-doctor plugin --config samples/redis-plugin.example.json
+```
+
+See [`docs/redis-plugin.md`](docs/redis-plugin.md).
+
+### RabbitMQ
+
+`ErpDoctor.Plugin.RabbitMq` uses the Management HTTP API with **GET-only** requests for overview, node alarms/partitions, and a bounded paginated queue list. Passwords come from an environment variable and failed response bodies are not copied into evidence.
+
+```bash
+erp-doctor plugin --config samples/rabbitmq-plugin.example.json
+```
+
+See [`docs/rabbitmq-plugin.md`](docs/rabbitmq-plugin.md).
 
 ## Plugin SDK
 
@@ -325,9 +325,9 @@ public sealed class MyPlugin : IErpDoctorPlugin
 }
 ```
 
-Plugin IDs become `plugin.<plugin-id>.<check-id>`. ERP Doctor loads only explicit local DLLs, rejects plugin URLs, validates API/check IDs, and converts load failures into diagnostics.
+Plugin IDs become `plugin.<plugin-id>.<check-id>`. ERP Doctor loads only explicit local DLLs, rejects plugin URLs, validates IDs, and converts load failures into diagnostics.
 
-**Plugins are executable code** and run with ERP Doctor process permissions; only load plugins you trust.
+**Plugins are executable code** and run with ERP Doctor process permissions. Only load plugins you trust.
 
 See [`docs/plugin-sdk.md`](docs/plugin-sdk.md).
 
@@ -338,14 +338,17 @@ Every release runs restore → build → test → package. Dry-runs additionally
 - self-contained Windows/Linux publish,
 - standalone Linux `--help`,
 - standalone Linux Network Doctor DNS/TCP loopback behavior,
-- standalone loading of PostgreSQL (4), Docker (3), Nginx (3), Redis (5), and RabbitMQ (3) checks,
+- standalone Linux System Doctor CPU/load/process-pressure execution,
+- standalone provider loading: PostgreSQL (4), Docker (3), Nginx (2), Redis (5), RabbitMQ (3),
 - provider archive creation,
 - SHA256 verification for platform/provider/NuGet/installer assets,
 - Linux installer installation/execution from the packaged release.
 
-Windows CI separately runs `install.ps1` under Windows PowerShell, requires an invalid checksum to be rejected, then verifies a valid archive can be installed and executed.
+Windows CI separately validates the PowerShell installer, requires a deliberately invalid checksum to be rejected, then verifies a valid archive can be installed/executed.
 
 Branch/manual dry-runs cannot create a GitHub Release or publish NuGet; publishing is guarded to real tag pushes only.
+
+See [`docs/releasing.md`](docs/releasing.md).
 
 ## Architecture
 
@@ -357,8 +360,8 @@ Branch/manual dry-runs cannot create a GitHub Release or publish NuGet; publishi
        Built-in checks                    PluginHost
              |                                 |
  System / Network / SQL / HTTP / IIS / EventLog   PluginSdk DLLs
-             |              /       /        |        |       |        \
-             |         Sample  PostgreSQL  Redis  RabbitMQ  Docker   Nginx
+             |                 /      /       |       |        \
+             |            PostgreSQL Docker  Nginx   Redis  RabbitMQ
              +----------------+----------------+
                               |
                        DiagnosticRunner
@@ -382,15 +385,16 @@ Current built-in/provider/installer behavior follows these principles:
 4. Event Log channels are never cleared/changed.
 5. SQL growth history writes local state only.
 6. Config drift never prints/hashes sensitive values.
-7. Network Doctor only probes explicitly configured DNS names/TCP ports; it performs no port scanning or network/firewall/routing mutation.
-8. PostgreSQL provider never terminates/cancels backends.
-9. Redis provider never reads keys/values or changes Redis state/topology.
-10. RabbitMQ provider is GET-only and never publishes/purges/deletes/requeues messages or mutates broker topology/accounts.
-11. Docker provider never changes container/engine state.
-12. Nginx provider never reloads/stops Nginx or dumps the full config.
-13. Permission/CLI/API failures become diagnostics instead of privilege escalation.
-14. Self-contained installers verify SHA256 before extraction; Windows does not clear custom destination directories and Linux does not modify shell startup files.
-15. Third-party plugins remain a separate executable-code trust boundary.
+7. Network Doctor only probes explicitly configured DNS names/TCP ports; it performs no discovery/scanning or network mutation.
+8. System pressure checks never terminate/suspend processes and never collect process command lines, environment variables, or memory contents.
+9. PostgreSQL provider never terminates/cancels backends.
+10. Redis provider never reads keys/values or changes Redis state/topology.
+11. RabbitMQ provider is GET-only and never publishes/purges/deletes/requeues messages or mutates broker topology/accounts.
+12. Docker provider never changes container/engine state.
+13. Nginx provider never reloads/stops Nginx or dumps the full config.
+14. Permission/CLI/API failures become diagnostics instead of privilege escalation.
+15. Self-contained installers verify SHA256 before extraction; Windows does not clear custom destination directories and Linux does not modify shell startup files.
+16. Third-party plugins remain a separate executable-code trust boundary.
 
 ## Roadmap
 
@@ -412,11 +416,11 @@ Completed:
 - [x] v0.14 RabbitMQ provider
 - [x] v0.15 checksum-verified Windows/Linux installer UX
 - [x] v0.16 cross-platform DNS/TCP Network Doctor
+- [x] v0.17 cross-platform CPU/load/process-pressure System Doctor
 
 Next:
 
 - [ ] First public release/tag after explicit maintainer approval
-- [ ] Broader cross-platform CPU/load/process diagnostics
 - [ ] Optional machine-readable integration/MCP surface after provider feedback
 - [ ] Additional providers driven by real incidents/contributor demand
 
