@@ -6,13 +6,13 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4.svg)](https://dotnet.microsoft.com/)
 
-ERP Doctor is an open-source, evidence-first diagnostic CLI for the infrastructure small ERP teams end up owning all at once: **Windows, IIS, .NET APIs, SQL Server, PostgreSQL, Docker, HTTP endpoints, Event Log, disks, memory, and environment configuration**.
+ERP Doctor is an open-source, evidence-first diagnostic CLI for the infrastructure small ERP teams end up owning all at once: **Windows, Linux, IIS, Nginx, .NET APIs, SQL Server, PostgreSQL, Docker, HTTP endpoints, Event Log, disks, memory, and environment configuration**.
 
 ```text
 CHECK -> COLLECT EVIDENCE -> CORRELATE -> DIAGNOSE -> RECOMMEND
 ```
 
-Instead of opening SSMS, IIS Manager, Event Viewer, Task Manager, Docker tooling, and a browser one by one:
+Instead of opening SSMS, IIS Manager, Event Viewer, Task Manager, Docker/Linux tooling, and a browser one by one:
 
 ```bash
 erp-doctor check
@@ -20,7 +20,7 @@ erp-doctor check
 
 ## Why ERP Doctor?
 
-An endpoint can tell you an API is down. It usually cannot tell you whether the real issue is a stopped AppPool, disk pressure, SQL blocking, an unhealthy container, config drift, a failed .NET startup, or a database that doubled in size over the last week.
+An endpoint can tell you an API is down. It usually cannot tell you whether the real issue is a stopped AppPool, Linux load pressure, invalid Nginx config, disk pressure, SQL blocking, an unhealthy container, config drift, or a failed .NET startup.
 
 ERP Doctor keeps those signals in one run so support/developers can reason about the **whole system**, not one component at a time.
 
@@ -33,6 +33,7 @@ ERP Doctor keeps those signals in one run so support/developers can reason about
 | SQL growth | Local historical snapshots, size deltas, MB/day, table/row growth |
 | PostgreSQL plugin | Connectivity, database size, long-running queries, blocking sessions |
 | Docker plugin | Engine reachability/version, engine summary, container state/health, expected containers |
+| Linux/Nginx plugin | Linux uptime/load/memory snapshot, Nginx version, config validation |
 | IIS | AppPool state, site state, bindings, root physical path |
 | HTTP | Expected status code, timeout, latency threshold |
 | Windows Event Log | Recent Critical/Error entries, optional Warning/provider filters |
@@ -77,6 +78,7 @@ erp-doctor-win-x64.zip
 erp-doctor-linux-x64.tar.gz
 erp-doctor-plugin-postgres.zip
 erp-doctor-plugin-docker.zip
+erp-doctor-plugin-nginx.zip
 ErpDoctor.Tool.<version>.nupkg
 ErpDoctor.PluginSdk.<version>.nupkg
 checksums.txt
@@ -104,37 +106,6 @@ Run configured diagnostics:
 erp-doctor check --config erp-doctor.json
 ```
 
-## Example
-
-```text
-ERP Doctor
-────────────────────────────────────────────────────────────────
-Health score: 48/100 | Overall: Critical
-
-SYSTEM
-✓ .NET runtime                   .NET 8.0.18
-✗ Disk space (C:\)               5.4 GB free of 120.0 GB
-
-SQL
-✓ SQL Server connection          Connected to SQL01/ERP_PROD in 24 ms
-! SQL Server blocking            2 blocked requests; longest wait 47.0s
-
-IIS
-✗ IIS AppPool ErpApi             AppPool state: Stopped
-
-HTTP
-✗ ERP API                        HTTP 503 in 31 ms
-
-EVENTLOG
-! ERP application errors         2 recent .NET/IIS errors
-
-DIAGNOSIS
-CRITICAL: Application unavailable with critically low disk space
-  -> Free disk space before repeated restarts.
-  -> Inspect startup/Event Log evidence.
-  -> Re-run erp-doctor check after the root cause is resolved.
-```
-
 ## Commands
 
 ```text
@@ -155,8 +126,6 @@ erp-doctor plugin       Run contributed plugin checks only
 ```
 
 ## SQL Server growth
-
-A one-time database size tells you size, not **what grew**:
 
 ```bash
 erp-doctor growth --config erp-doctor.json
@@ -179,17 +148,13 @@ plugin.postgres.blocking
 
 The connection string is read from an environment variable; SQL text from `pg_stat_activity` is deliberately excluded from evidence. The provider never calls `pg_terminate_backend` or `pg_cancel_backend`.
 
-```powershell
-$env:ERP_DOCTOR_POSTGRES="Host=localhost;Port=5432;Database=erp;Username=erp_doctor;Password=..."
-```
-
 ```bash
 erp-doctor plugin --config samples/postgres-plugin.example.json
 ```
 
 See [`docs/postgres-plugin.md`](docs/postgres-plugin.md).
 
-## Docker provider (v0.11)
+## Docker provider
 
 `ErpDoctor.Plugin.Docker` contributes:
 
@@ -199,42 +164,43 @@ plugin.docker.info
 plugin.docker.containers
 ```
 
-It uses the installed Docker CLI with fixed read-only arguments. It does not invoke a shell and never starts/stops/restarts/removes containers.
-
-Example config:
-
-```json
-{
-  "plugins": {
-    "assemblies": [
-      "plugins/ErpDoctor.Plugin.Docker/bin/Release/net8.0/ErpDoctor.Plugin.Docker.dll"
-    ],
-    "settings": {
-      "docker": {
-        "dockerExecutable": "docker",
-        "commandTimeoutSeconds": 10,
-        "warnOnStoppedContainers": false,
-        "maxContainerEvidence": 20,
-        "expectedContainers": ["erp-api", "redis"]
-      }
-    }
-  }
-}
-```
-
-Run it:
+It uses fixed Docker CLI argument lists without invoking a shell and never starts/stops/restarts/removes containers. Container evidence is limited to **name/state/health**; env vars, labels, command, mounts, and raw stderr are excluded.
 
 ```bash
 erp-doctor plugin --config samples/docker-plugin.example.json
 ```
 
-Container evidence is limited to **name/state/health**. The provider does not emit env vars, labels, commands, mounts, or raw Docker stderr. Missing/not-running expected containers, unhealthy health, or severe states are Critical; stopped containers are noisy only when explicitly enabled.
-
 See [`docs/docker-plugin.md`](docs/docker-plugin.md).
 
-## Configuration drift
+## Linux / Nginx provider (v0.12)
 
-Compare DEV/UAT/PROD/customer settings:
+`ErpDoctor.Plugin.Nginx` contributes:
+
+```text
+plugin.nginx.linux-runtime
+plugin.nginx.version
+plugin.nginx.config
+```
+
+Linux runtime evidence is read from `/etc/os-release` and `/proc` only. It reports distro/version, uptime, 1/5/15-minute load, load-per-CPU, and available-memory percentage when available.
+
+Nginx inspection is intentionally narrow:
+
+```text
+nginx -v
+nginx -t -q
+nginx -t -q -c <configured-path>
+```
+
+The provider never runs `nginx -T` and never sends `reload`, `stop`, `quit`, or `reopen` signals. Failed config tests expose only bounded status/path evidence; raw stderr is suppressed.
+
+```bash
+erp-doctor plugin --config samples/nginx-plugin.example.json
+```
+
+See [`docs/nginx-plugin.md`](docs/nginx-plugin.md).
+
+## Configuration drift
 
 ```bash
 erp-doctor config-diff \
@@ -252,14 +218,6 @@ See [`docs/config-drift.md`](docs/config-drift.md).
 ```bash
 erp-doctor report --config erp-doctor.json
 erp-doctor bundle --config erp-doctor.json
-```
-
-The support ZIP contains:
-
-```text
-report.json
-report.html
-manifest.json
 ```
 
 Secret-like report evidence is sanitized before serialization. Operational identifiers may remain, so bundles should still be reviewed before sharing outside the organization.
@@ -282,25 +240,20 @@ public sealed class MyPlugin : IErpDoctorPlugin
 }
 ```
 
-Plugin IDs become:
+Plugin IDs become `plugin.<plugin-id>.<check-id>`. ERP Doctor loads only explicit local DLLs, rejects plugin URLs, validates API/check IDs, and converts load failures into diagnostics.
 
-```text
-plugin.<plugin-id>.<check-id>
-```
-
-ERP Doctor loads only explicit local DLLs, rejects plugin URLs, validates API/check IDs, and converts load failures into diagnostics. **Plugins are executable code** and run with ERP Doctor process permissions; only load plugins you trust.
+**Plugins are executable code** and run with ERP Doctor process permissions; only load plugins you trust.
 
 See [`docs/plugin-sdk.md`](docs/plugin-sdk.md).
 
 ## Release validation
 
-Every release runs restore → build → test → package before distribution. Dry runs additionally prove:
+Every release runs restore → build → test → package. Dry runs additionally prove:
 
 - self-contained Windows/Linux publish,
 - standalone Linux `--help`,
-- standalone loading of PostgreSQL and Docker plugin DLLs,
-- provider check counts,
-- release archive creation,
+- standalone loading of PostgreSQL (4), Docker (3), and Nginx (3) provider checks,
+- provider archive creation,
 - SHA256 verification.
 
 Branch/manual dry runs cannot create a GitHub Release or publish NuGet; publishing is guarded to real tag pushes only.
@@ -315,8 +268,8 @@ Branch/manual dry runs cannot create a GitHub Release or publish NuGet; publishi
        Built-in checks                    PluginHost
              |                                 |
  System / SQL / HTTP / IIS / EventLog      PluginSdk DLLs
-             |                         /       |       \
-             |                    Sample   PostgreSQL  Docker
+             |                     /          |         |        \
+             |                Sample     PostgreSQL   Docker    Nginx
              +----------------+----------------+
                               |
                        DiagnosticRunner
@@ -332,7 +285,7 @@ Branch/manual dry runs cannot create a GitHub Release or publish NuGet; publishi
 
 ## Safety model
 
-Built-in/provider diagnostics currently follow these principles:
+Current built-in/provider diagnostics follow these principles:
 
 1. No automatic ERP/database repair or data mutation.
 2. No automatic SQL Server session kill.
@@ -342,8 +295,9 @@ Built-in/provider diagnostics currently follow these principles:
 6. Config drift never prints/hashes sensitive values.
 7. PostgreSQL provider never terminates/cancels backends.
 8. Docker provider never changes container/engine state.
-9. Permission/CLI failures become diagnostics instead of privilege escalation.
-10. Third-party plugins remain a separate executable-code trust boundary.
+9. Nginx provider never reloads/stops Nginx or dumps the full config.
+10. Permission/CLI failures become diagnostics instead of privilege escalation.
+11. Third-party plugins remain a separate executable-code trust boundary.
 
 ## Roadmap
 
@@ -359,18 +313,18 @@ Completed:
 - [x] v0.8 Plugin SDK + PluginHost
 - [x] v0.9 PostgreSQL provider
 - [x] v0.10 release automation + package/single-file validation
-- [x] v0.11 Docker diagnostics provider
+- [x] v0.11 Docker provider
+- [x] v0.12 Linux/Nginx provider
 
 Next:
 
-- [ ] Linux/Nginx provider
 - [ ] Redis/RabbitMQ providers
 - [ ] Broader cross-platform system diagnostics
 - [ ] Installer UX based on release feedback
 
 ## Contributing
 
-The best checks come from real incidents. Useful diagnostics should be safe to run in production, collect evidence instead of guessing, bound their timeouts/output, explain required permissions, avoid destructive automatic fixes, and remain useful without an AI API.
+The best checks come from real incidents. Useful diagnostics should be safe to run in production, collect evidence instead of guessing, bound timeouts/output, explain required permissions, avoid destructive automatic fixes, and remain useful without an AI API.
 
 For external providers, prefer the Plugin SDK instead of adding provider-specific dependencies to Core.
 
