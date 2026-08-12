@@ -6,6 +6,7 @@ public sealed class ErpDoctorOptions
 {
     public SqlServerOptions SqlServer { get; init; } = new();
     public HttpOptions Http { get; init; } = new();
+    public NetworkOptions Network { get; init; } = new();
     public IisOptions Iis { get; init; } = new();
     public WindowsEventLogOptions WindowsEventLog { get; init; } = new();
     public PluginOptions Plugins { get; init; } = new();
@@ -48,6 +49,15 @@ public sealed class ErpDoctorOptions
                     })
                     .ToArray()
             },
+            Network = Network with
+            {
+                Targets = Network.Targets
+                    .Select(target => target with
+                    {
+                        Host = EnvironmentExpander.Expand(target.Host) ?? string.Empty
+                    })
+                    .ToArray()
+            },
             Iis = Iis,
             WindowsEventLog = WindowsEventLog,
             Plugins = Plugins with
@@ -85,6 +95,22 @@ public sealed record HttpEndpointOptions
     public int ExpectedStatusCode { get; init; } = 200;
     public int TimeoutSeconds { get; init; } = 10;
     public int LatencyWarningMs { get; init; } = 1500;
+}
+
+public sealed record NetworkOptions
+{
+    public IReadOnlyList<NetworkTargetOptions> Targets { get; init; } =
+        Array.Empty<NetworkTargetOptions>();
+}
+
+public sealed record NetworkTargetOptions
+{
+    public string Name { get; init; } = "Network target";
+    public string Host { get; init; } = string.Empty;
+    public int Port { get; init; }
+    public int TimeoutSeconds { get; init; } = 5;
+    public int LatencyWarningMs { get; init; } = 500;
+    public int MaxResolvedAddresses { get; init; } = 5;
 }
 
 public sealed record IisOptions
