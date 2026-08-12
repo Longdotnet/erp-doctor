@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using ErpDoctor.Core;
 using ErpDoctor.Infrastructure.HttpDiagnostics;
 using ErpDoctor.Infrastructure.IisDiagnostics;
+using ErpDoctor.Infrastructure.NetworkDiagnostics;
 using ErpDoctor.Infrastructure.SqlServerDiagnostics;
 using ErpDoctor.Infrastructure.SystemDiagnostics;
 using ErpDoctor.Infrastructure.WindowsEventDiagnostics;
@@ -109,6 +110,7 @@ internal static class ProgramEntry
             "system" => "system",
             "sql" => "sql",
             "http" => "http",
+            "network" => "network",
             "iis" => "iis",
             "eventlog" => "eventlog",
             "plugin" => "plugin",
@@ -266,6 +268,12 @@ internal static class ProgramEntry
             checks.Add(new HttpEndpointCheck(endpoint));
         }
 
+        foreach (var target in options.Network.Targets)
+        {
+            checks.Add(new DnsResolutionCheck(target));
+            checks.Add(new TcpConnectivityCheck(target));
+        }
+
         foreach (var appPool in options.Iis.AppPools)
         {
             checks.Add(new IisAppPoolCheck(appPool));
@@ -398,6 +406,7 @@ internal static class ProgramEntry
               erp-doctor system [--config erp-doctor.json]
               erp-doctor sql [--config erp-doctor.json]
               erp-doctor http [--config erp-doctor.json]
+              erp-doctor network [--config erp-doctor.json]
               erp-doctor iis [--config erp-doctor.json]
               erp-doctor eventlog [--config erp-doctor.json]
               erp-doctor plugins [--config erp-doctor.json]
@@ -412,6 +421,7 @@ internal static class ProgramEntry
               system       Inspect disk, memory, runtime, and OS information.
               sql          Inspect SQL Server connectivity, size, largest tables, blocking, and long requests.
               http         Probe configured HTTP health endpoints.
+              network      Resolve configured hosts and test TCP port reachability/latency cross-platform.
               iis          Inspect configured IIS AppPools, sites, bindings, and physical paths on Windows.
               eventlog     Inspect configured recent Windows Event Log errors/warnings.
               plugins      Discover configured plugin assemblies without executing plugin checks.
@@ -434,8 +444,8 @@ internal static class ProgramEntry
               plugins you trust. Raw plugin exception messages are suppressed by the host.
 
             Safety:
-              ERP Doctor v0.8 keeps built-in production diagnostics read-only. Plugin behavior is owned
-              by the plugin author and is outside ERP Doctor's built-in read-only guarantee.
+              Built-in production diagnostics are read-only. Plugin behavior is owned by the plugin
+              author and is outside ERP Doctor's built-in read-only guarantee.
             """);
     }
 }
