@@ -10,6 +10,7 @@
   <ItemGroup>
     <ProjectReference Include="..\ErpDoctor.Core\ErpDoctor.Core.csproj" />
     <ProjectReference Include="..\ErpDoctor.Infrastructure\ErpDoctor.Infrastructure.csproj" />
+    <ProjectReference Include="..\ErpDoctor.PluginHost\ErpDoctor.PluginHost.csproj" />
     <ProjectReference Include="..\ErpDoctor.Reporting\ErpDoctor.Reporting.csproj" />
   </ItemGroup>
 </Project>
