@@ -133,13 +133,13 @@ public sealed class TcpConnectivityCheck(NetworkTargetOptions target) : IDiagnos
                 "No host configured.");
         }
 
-        if (target.Port is < IPEndPoint.MinPort or > IPEndPoint.MaxPort)
+        if (target.Port is < 1 or > IPEndPoint.MaxPort)
         {
             return new DiagnosticResult(
                 Id,
                 Name,
                 DiagnosticStatus.Error,
-                $"Configured TCP port {target.Port} is outside the valid range 0-65535.",
+                $"Configured TCP port {target.Port} is outside the valid range 1-65535.",
                 new Dictionary<string, string>
                 {
                     ["host"] = target.Host,
