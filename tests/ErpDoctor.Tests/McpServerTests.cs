@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Text.Json;
 using ErpDoctor.Core;
 using ErpDoctor.Mcp;
+using ModelContextProtocol;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Server;
 using Xunit;
@@ -48,6 +49,29 @@ public sealed class McpServerTests
         Assert.True(attribute.Idempotent);
         Assert.True(attribute.OpenWorld);
         Assert.True(attribute.UseStructuredContent);
+    }
+
+    [Fact]
+    public async Task RunDiagnosticsTool_InvalidScopeReturnsBoundedMcpError()
+    {
+        var path = WriteMinimalConfig();
+        try
+        {
+            var exception = await Assert.ThrowsAsync<McpException>(() =>
+                ErpDoctorMcpTools.RunDiagnosticsAsync(
+                    "../../secret-config",
+                    new McpDiagnosticService(path),
+                    TestContext.Current.CancellationToken));
+
+            Assert.Equal(
+                "Scope must be one of: check, system, sql, http, network, iis, eventlog, plugin.",
+                exception.Message);
+            Assert.DoesNotContain(path, exception.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
     }
 
     [Fact]
