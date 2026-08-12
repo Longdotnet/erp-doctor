@@ -5,6 +5,7 @@ using ErpDoctor.Infrastructure.HttpDiagnostics;
 using ErpDoctor.Infrastructure.IisDiagnostics;
 using ErpDoctor.Infrastructure.SqlServerDiagnostics;
 using ErpDoctor.Infrastructure.SystemDiagnostics;
+using ErpDoctor.Infrastructure.WindowsEventDiagnostics;
 using ErpDoctor.Reporting;
 
 return await ProgramEntry.RunAsync(args);
@@ -38,31 +39,11 @@ internal static class ProgramEntry
 
         if (command.Equals("config-diff", StringComparison.OrdinalIgnoreCase))
         {
-            if (string.IsNullOrWhiteSpace(leftConfigPath) ||
-                string.IsNullOrWhiteSpace(rightConfigPath))
-            {
-                Console.Error.WriteLine("config-diff requires both --left <path> and --right <path>.");
-                return 2;
-            }
-
-            try
-            {
-                return await RunConfigDiffAsync(
-                    leftConfigPath,
-                    rightConfigPath,
-                    ignorePrefixes,
-                    cts.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                Console.Error.WriteLine("Configuration comparison cancelled.");
-                return 130;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
-            {
-                Console.Error.WriteLine($"Could not compare configuration: {ex.Message}");
-                return 2;
-            }
+            return await RunConfigDiffCommandAsync(
+                leftConfigPath,
+                rightConfigPath,
+                ignorePrefixes,
+                cts.Token);
         }
 
         if (command.Equals("report", StringComparison.OrdinalIgnoreCase) &&
@@ -107,9 +88,6 @@ internal static class ProgramEntry
             }
         }
 
-        var checks = BuildChecks(options);
-        var runner = new DiagnosticRunner(checks);
-        var context = new DiagnosticContext(options);
         var category = command.ToLowerInvariant() switch
         {
             "check" => null,
@@ -119,6 +97,7 @@ internal static class ProgramEntry
             "sql" => "sql",
             "http" => "http",
             "iis" => "iis",
+            "eventlog" => "eventlog",
             _ => "__unknown__"
         };
 
@@ -129,6 +108,8 @@ internal static class ProgramEntry
             return 2;
         }
 
+        var runner = new DiagnosticRunner(BuildChecks(options));
+        var context = new DiagnosticContext(options);
         IReadOnlyList<DiagnosticResult> results;
         try
         {
@@ -178,26 +159,46 @@ internal static class ProgramEntry
             : 0;
     }
 
-    private static async Task<int> RunConfigDiffAsync(
-        string leftPath,
-        string rightPath,
+    private static async Task<int> RunConfigDiffCommandAsync(
+        string? leftPath,
+        string? rightPath,
         IReadOnlyList<string> ignorePrefixes,
         CancellationToken cancellationToken)
     {
-        var leftFullPath = Path.GetFullPath(leftPath);
-        var rightFullPath = Path.GetFullPath(rightPath);
-        var leftJson = await File.ReadAllTextAsync(leftFullPath, cancellationToken);
-        var rightJson = await File.ReadAllTextAsync(rightFullPath, cancellationToken);
+        if (string.IsNullOrWhiteSpace(leftPath) ||
+            string.IsNullOrWhiteSpace(rightPath))
+        {
+            Console.Error.WriteLine("config-diff requires both --left <path> and --right <path>.");
+            return 2;
+        }
 
-        var report = JsonConfigDriftAnalyzer.Compare(
-            leftJson,
-            rightJson,
-            leftFullPath,
-            rightFullPath,
-            ignorePrefixes);
+        try
+        {
+            var leftFullPath = Path.GetFullPath(leftPath);
+            var rightFullPath = Path.GetFullPath(rightPath);
+            var leftJson = await File.ReadAllTextAsync(leftFullPath, cancellationToken);
+            var rightJson = await File.ReadAllTextAsync(rightFullPath, cancellationToken);
 
-        ConfigDriftConsoleReport.Write(report);
-        return report.Differences.Count == 0 ? 0 : 1;
+            var report = JsonConfigDriftAnalyzer.Compare(
+                leftJson,
+                rightJson,
+                leftFullPath,
+                rightFullPath,
+                ignorePrefixes);
+
+            ConfigDriftConsoleReport.Write(report);
+            return report.Differences.Count == 0 ? 0 : 1;
+        }
+        catch (OperationCanceledException)
+        {
+            Console.Error.WriteLine("Configuration comparison cancelled.");
+            return 130;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            Console.Error.WriteLine($"Could not compare configuration: {ex.Message}");
+            return 2;
+        }
     }
 
     private static async Task<int> RunGrowthAsync(
@@ -224,38 +225,6 @@ internal static class ProgramEntry
 
         GrowthConsoleReport.Write(current, comparison, savedPath);
         return 0;
-    }
-
-    private static async Task<string> WriteJsonReportAsync(
-        DiagnosticReport report,
-        string path,
-        CancellationToken cancellationToken)
-    {
-        var options = new JsonSerializerOptions
-        {
-            WriteIndented = true,
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-        };
-        options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
-
-        var json = JsonSerializer.Serialize(report, options);
-        return await WriteTextFileAsync(path, json, cancellationToken);
-    }
-
-    private static async Task<string> WriteTextFileAsync(
-        string path,
-        string content,
-        CancellationToken cancellationToken)
-    {
-        var fullPath = Path.GetFullPath(path);
-        var directory = Path.GetDirectoryName(fullPath);
-        if (!string.IsNullOrWhiteSpace(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
-
-        await File.WriteAllTextAsync(fullPath, content, cancellationToken);
-        return fullPath;
     }
 
     private static IReadOnlyList<IDiagnosticCheck> BuildChecks(ErpDoctorOptions options)
@@ -291,7 +260,44 @@ internal static class ProgramEntry
             checks.Add(new IisSiteCheck(site));
         }
 
+        foreach (var eventQuery in options.WindowsEventLog.Queries)
+        {
+            checks.Add(new WindowsEventLogCheck(eventQuery));
+        }
+
         return checks;
+    }
+
+    private static async Task<string> WriteJsonReportAsync(
+        DiagnosticReport report,
+        string path,
+        CancellationToken cancellationToken)
+    {
+        var options = new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        };
+        options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
+
+        var json = JsonSerializer.Serialize(report, options);
+        return await WriteTextFileAsync(path, json, cancellationToken);
+    }
+
+    private static async Task<string> WriteTextFileAsync(
+        string path,
+        string content,
+        CancellationToken cancellationToken)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var directory = Path.GetDirectoryName(fullPath);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        await File.WriteAllTextAsync(fullPath, content, cancellationToken);
+        return fullPath;
     }
 
     private static string GetCommand(string[] args)
@@ -363,6 +369,7 @@ internal static class ProgramEntry
               erp-doctor sql [--config erp-doctor.json]
               erp-doctor http [--config erp-doctor.json]
               erp-doctor iis [--config erp-doctor.json]
+              erp-doctor eventlog [--config erp-doctor.json]
 
             Commands:
               check        Run every configured diagnostic and correlate likely causes.
@@ -374,6 +381,7 @@ internal static class ProgramEntry
               sql          Inspect SQL Server connectivity, size, largest tables, blocking, and long requests.
               http         Probe configured HTTP health endpoints.
               iis          Inspect configured IIS AppPools, sites, bindings, and physical paths on Windows.
+              eventlog     Inspect configured recent Windows Event Log errors/warnings.
 
             Output/state options:
               --json <path>     Write the stable machine-readable report schema as JSON.
@@ -392,241 +400,8 @@ internal static class ProgramEntry
               2  Invalid arguments, unreadable file, or invalid JSON.
 
             Safety:
-              ERP Doctor v0.6 keeps IIS diagnostics read-only. It inspects configured AppPools,
-              sites, bindings, and physical paths but never starts/stops or rewrites IIS objects.
+              ERP Doctor v0.7 keeps production diagnostics read-only. Windows Event Log checks
+              query and render entries only; they never clear, delete, or modify event channels.
             """);
     }
-}
-
-internal static class ConfigDriftConsoleReport
-{
-    public static void Write(ConfigDriftReport report)
-    {
-        Console.WriteLine();
-        Console.WriteLine("ERP Doctor - Configuration Drift");
-        Console.WriteLine(new string('─', 72));
-        Console.WriteLine($"Left  : {report.LeftLabel}");
-        Console.WriteLine($"Right : {report.RightLabel}");
-        Console.WriteLine($"Drift : {report.Differences.Count} difference(s)");
-
-        if (report.Differences.Count == 0)
-        {
-            Console.WriteLine();
-            Console.WriteLine("No configuration drift detected.");
-            return;
-        }
-
-        foreach (var difference in report.Differences)
-        {
-            Console.WriteLine();
-            Console.WriteLine($"{GetSymbol(difference.Kind)} {difference.Path} ({Describe(difference.Kind)})");
-            Console.WriteLine($"  left  : {difference.LeftValue}");
-            Console.WriteLine($"  right : {difference.RightValue}");
-            if (difference.IsSensitive)
-            {
-                Console.WriteLine("  note  : sensitive values are redacted; ERP Doctor does not hash or print them.");
-            }
-        }
-    }
-
-    private static string GetSymbol(ConfigDriftKind kind) => kind switch
-    {
-        ConfigDriftKind.Different => "~",
-        ConfigDriftKind.TypeChanged => "!",
-        ConfigDriftKind.MissingLeft => "+",
-        ConfigDriftKind.MissingRight => "-",
-        _ => "?"
-    };
-
-    private static string Describe(ConfigDriftKind kind) => kind switch
-    {
-        ConfigDriftKind.Different => "different",
-        ConfigDriftKind.TypeChanged => "type changed",
-        ConfigDriftKind.MissingLeft => "only on right",
-        ConfigDriftKind.MissingRight => "only on left",
-        _ => "unknown"
-    };
-}
-
-internal static class GrowthConsoleReport
-{
-    public static void Write(
-        SqlGrowthSnapshot current,
-        SqlGrowthComparison? comparison,
-        string historyPath)
-    {
-        Console.WriteLine();
-        Console.WriteLine("ERP Doctor - Database Growth");
-        Console.WriteLine(new string('─', 72));
-        Console.WriteLine($"Database : {current.Server}/{current.Database}");
-        Console.WriteLine($"Captured : {current.CapturedAtUtc:yyyy-MM-dd HH:mm:ss} UTC");
-        Console.WriteLine(
-            $"Current  : {current.TotalSizeMb / 1024d:F2} GB total " +
-            $"({current.DataSizeMb / 1024d:F2} GB data, {current.LogSizeMb / 1024d:F2} GB log)");
-
-        if (comparison is null)
-        {
-            Console.WriteLine();
-            Console.WriteLine("Baseline created. Run `erp-doctor growth` again later to calculate growth deltas.");
-            Console.WriteLine($"History  : {historyPath}");
-            return;
-        }
-
-        Console.WriteLine();
-        Console.WriteLine(
-            $"Since    : {comparison.PreviousCapturedAtUtc:yyyy-MM-dd HH:mm:ss} UTC " +
-            $"({FormatInterval(comparison.Interval)})");
-        Console.WriteLine($"Data     : {FormatDelta(comparison.DataDeltaMb)}");
-        Console.WriteLine($"Log      : {FormatDelta(comparison.LogDeltaMb)}");
-        Console.WriteLine($"Total    : {FormatDelta(comparison.TotalDeltaMb)}");
-        if (comparison.TotalGrowthMbPerDay is { } perDay)
-        {
-            Console.WriteLine($"Rate     : {perDay:+0.0;-0.0;0.0} MB/day");
-        }
-
-        Console.WriteLine();
-        Console.WriteLine("Table growth");
-        Console.WriteLine(new string('─', 72));
-
-        if (comparison.TableGrowth.Count == 0)
-        {
-            Console.WriteLine("No table-size changes detected in the captured set.");
-        }
-        else
-        {
-            foreach (var table in comparison.TableGrowth)
-            {
-                if (table.IsNewInCapturedSet)
-                {
-                    Console.WriteLine(
-                        $"? {table.Name,-36} {table.CurrentReservedMb,10:F1} MB  new in captured set");
-                    continue;
-                }
-
-                Console.WriteLine(
-                    $"  {table.Name,-36} {table.ReservedDeltaMb,10:+0.0;-0.0;0.0} MB  " +
-                    $"rows {table.RowDelta,12:+#,0;-#,0;0}");
-            }
-        }
-
-        Console.WriteLine();
-        Console.WriteLine($"History  : {historyPath}");
-        Console.WriteLine("Note     : history is local ERP Doctor state; no history table is created in SQL Server.");
-    }
-
-    private static string FormatDelta(double value) =>
-        $"{value:+0.0;-0.0;0.0} MB";
-
-    private static string FormatInterval(TimeSpan value)
-    {
-        if (value.TotalDays >= 1)
-        {
-            return $"{value.TotalDays:F1} days";
-        }
-
-        if (value.TotalHours >= 1)
-        {
-            return $"{value.TotalHours:F1} hours";
-        }
-
-        return $"{Math.Max(1, value.TotalMinutes):F0} minutes";
-    }
-}
-
-internal static class ConsoleReport
-{
-    public static void Write(DiagnosticReport report)
-    {
-        var results = report.Results;
-        var diagnoses = report.Diagnoses;
-
-        Console.WriteLine();
-        Console.WriteLine("ERP Doctor");
-        Console.WriteLine(new string('─', 64));
-        Console.WriteLine($"Health score: {report.HealthScore}/100 | Overall: {report.OverallStatus}");
-
-        foreach (var group in results.GroupBy(GetCategory))
-        {
-            Console.WriteLine();
-            Console.WriteLine(group.Key.ToUpperInvariant());
-            Console.WriteLine(new string('─', 64));
-
-            foreach (var result in group)
-            {
-                var oldColor = Console.ForegroundColor;
-                Console.ForegroundColor = GetColor(result.Status);
-                Console.Write(GetSymbol(result.Status));
-                Console.ForegroundColor = oldColor;
-
-                Console.WriteLine($" {result.Name,-30} {result.Summary}");
-
-                foreach (var suggestion in result.SuggestionsOrEmpty)
-                {
-                    Console.WriteLine($"    -> {suggestion}");
-                }
-            }
-        }
-
-        if (diagnoses.Count > 0)
-        {
-            Console.WriteLine();
-            Console.WriteLine("DIAGNOSIS");
-            Console.WriteLine(new string('─', 64));
-
-            foreach (var diagnosis in diagnoses)
-            {
-                var oldColor = Console.ForegroundColor;
-                Console.ForegroundColor = GetColor(diagnosis.Status);
-                Console.WriteLine($"{diagnosis.Status.ToString().ToUpperInvariant()}: {diagnosis.Title}");
-                Console.ForegroundColor = oldColor;
-
-                Console.WriteLine(diagnosis.Explanation);
-                foreach (var evidence in diagnosis.Evidence)
-                {
-                    Console.WriteLine($"  evidence: {evidence}");
-                }
-
-                foreach (var action in diagnosis.SuggestedActions)
-                {
-                    Console.WriteLine($"  -> {action}");
-                }
-
-                Console.WriteLine();
-            }
-        }
-
-        var summary = report.Summary;
-        Console.WriteLine();
-        Console.WriteLine(
-            $"Summary: {summary.Healthy} healthy | {summary.Info} info | {summary.Warning} warning | " +
-            $"{summary.Critical} critical | {summary.Error} error | {summary.Skipped} skipped");
-    }
-
-    private static string GetCategory(DiagnosticResult result)
-    {
-        var index = result.CheckId.IndexOf('.');
-        return index < 0 ? "general" : result.CheckId[..index];
-    }
-
-    private static string GetSymbol(DiagnosticStatus status) => status switch
-    {
-        DiagnosticStatus.Healthy => "✓",
-        DiagnosticStatus.Info => "i",
-        DiagnosticStatus.Warning => "!",
-        DiagnosticStatus.Critical => "✗",
-        DiagnosticStatus.Skipped => "-",
-        DiagnosticStatus.Error => "x",
-        _ => "?"
-    };
-
-    private static ConsoleColor GetColor(DiagnosticStatus status) => status switch
-    {
-        DiagnosticStatus.Healthy => ConsoleColor.Green,
-        DiagnosticStatus.Info => ConsoleColor.Cyan,
-        DiagnosticStatus.Warning => ConsoleColor.Yellow,
-        DiagnosticStatus.Critical => ConsoleColor.Red,
-        DiagnosticStatus.Skipped => ConsoleColor.DarkGray,
-        DiagnosticStatus.Error => ConsoleColor.Magenta,
-        _ => Console.ForegroundColor
-    };
 }

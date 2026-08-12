@@ -2,7 +2,7 @@
 
 > Diagnose boring enterprise applications before your users call you.
 
-ERP Doctor is a read-only diagnostic CLI for the stack that small ERP teams end up owning all at once: Windows servers, IIS, .NET APIs, SQL Server, disks, memory, health endpoints, and environment configuration.
+ERP Doctor is a read-only diagnostic CLI for the stack that small ERP teams end up owning all at once: Windows servers, IIS, .NET APIs, SQL Server, disks, memory, health endpoints, Windows Event Log, and environment configuration.
 
 The goal is simple:
 
@@ -16,7 +16,7 @@ Instead of opening SSMS, IIS Manager, Event Viewer, Task Manager, and a browser 
 erp-doctor check
 ```
 
-## What v0.6 checks
+## What v0.7 checks
 
 - Fixed-disk free space
 - System memory
@@ -29,12 +29,13 @@ erp-doctor check
 - HTTP endpoint status and latency
 - IIS application-pool state
 - IIS site state, bindings, and physical path
+- Recent Windows Event Log Critical/Error events, with optional Warning/provider filters
 - Cross-check correlation for likely root causes
 - Sanitized support-bundle export for support handoff
 - SQL database/table growth compared with a local historical baseline
 - Secret-safe JSON/appsettings configuration drift between environments
 
-ERP Doctor is intentionally **read-only toward your ERP stack**. It does not kill SQL sessions, shrink databases, restart IIS, modify IIS bindings, delete logs, update ERP data, or rewrite appsettings files. Features such as `growth` may write ERP Doctor's own local state files.
+ERP Doctor is intentionally **read-only toward your ERP stack**. It does not kill SQL sessions, shrink databases, restart IIS, modify IIS bindings, clear Event Logs, delete logs, update ERP data, or rewrite appsettings files. Features such as `growth` may write ERP Doctor's own local state files.
 
 ## Example
 
@@ -62,6 +63,10 @@ HTTP
 ────────────────────────────────────────────────────────────────
 ✗ ERP API                        HTTP 503 in 31 ms
 
+EVENTLOG
+────────────────────────────────────────────────────────────────
+! ERP application errors         2 recent event(s): 0 critical, 2 error, 0 warning.
+
 DIAGNOSIS
 ────────────────────────────────────────────────────────────────
 CRITICAL: Application unavailable with critically low disk space
@@ -79,7 +84,7 @@ the server has critically low disk space.
 Requirements:
 
 - .NET 8 SDK
-- Windows when using IIS diagnostics
+- Windows when using IIS or Event Log diagnostics
 - Access to the SQL Server you want to inspect
 
 ```bash
@@ -114,6 +119,7 @@ dotnet run --project src/ErpDoctor.Cli -- system
 dotnet run --project src/ErpDoctor.Cli -- sql --config erp-doctor.json
 dotnet run --project src/ErpDoctor.Cli -- http --config erp-doctor.json
 dotnet run --project src/ErpDoctor.Cli -- iis --config erp-doctor.json
+dotnet run --project src/ErpDoctor.Cli -- eventlog --config erp-doctor.json
 ```
 
 Export machine-readable evidence:
@@ -269,6 +275,37 @@ For each configured site ERP Doctor checks whether the site is `Started`, whethe
 
 The implementation reads the IIS `Microsoft.Web.Administration.dll` already installed on Windows through reflection, so no extra package is required. It never starts/stops sites or changes bindings. See [`docs/iis-sites.md`](docs/iis-sites.md).
 
+## Windows Event Log
+
+Configure one or more recent-error queries:
+
+```json
+{
+  "windowsEventLog": {
+    "queries": [
+      {
+        "name": "ERP application errors",
+        "logName": "Application",
+        "lookbackMinutes": 60,
+        "maxEvents": 20,
+        "includeWarnings": false,
+        "providers": [
+          ".NET Runtime",
+          "Application Error",
+          "IIS AspNetCore Module V2"
+        ]
+      }
+    ]
+  }
+}
+```
+
+ERP Doctor reads the newest matching entries first through the native Windows Event Log API in `wevtapi.dll`. Provider filters are optional and case-insensitive. Critical events make the diagnostic `Critical`; Error and included Warning entries make it `Warning`; no matching event is `Healthy`.
+
+Messages are summarized, truncated, and scrubbed for common password/token/API-key/Bearer fragments before they enter reports or support bundles. This is best-effort sanitization rather than full anonymization, so operational identifiers can remain.
+
+The collector only uses `EvtQuery`, `EvtNext`, `EvtRender`, and `EvtClose`; it never clears or modifies the channel. See [`docs/windows-event-log.md`](docs/windows-event-log.md).
+
 ## Configuration
 
 See [`samples/erp-doctor.example.json`](samples/erp-doctor.example.json).
@@ -299,6 +336,16 @@ See [`samples/erp-doctor.example.json`](samples/erp-doctor.example.json).
         "expectedBindings": ["https:*:443:erp.example.com"]
       }
     ]
+  },
+  "windowsEventLog": {
+    "queries": [
+      {
+        "name": "ERP application errors",
+        "logName": "Application",
+        "lookbackMinutes": 60,
+        "maxEvents": 20
+      }
+    ]
   }
 }
 ```
@@ -312,13 +359,13 @@ See [`samples/erp-doctor.example.json`](samples/erp-doctor.example.json).
               |               |                |
        DiagnosticRunner     growth        config-diff
               |               |                |
-   +----------+---------+  SQL snapshot     JSON compare
-   |          |         |      |                |
- System   SQL Server HTTP/IIS local history  secret-safe diff
-   |          |         |      |
-   +----------+---------+  delta analyzer
-              |
-       DiagnosticResult
+   +----------+----------+  SQL snapshot     JSON compare
+   |          |          |      |                |
+ System   SQL Server   HTTP/IIS/EventLog   secret-safe diff
+   |          |          |      |
+   +----------+----------+  local history
+              |                 |
+       DiagnosticResult    delta analyzer
               |
         DiagnosisEngine
               |
@@ -333,7 +380,7 @@ See [`samples/erp-doctor.example.json`](samples/erp-doctor.example.json).
                                     Support Bundle
 ```
 
-Every diagnostic implements the small `IDiagnosticCheck` contract. The diagnostic core does not know about SQL Server, IIS, or HTTP, and local analysis commands remain isolated from production write operations.
+Every diagnostic implements the small `IDiagnosticCheck` contract. The diagnostic core does not know about SQL Server, IIS, HTTP, or Windows Event Log, and local analysis commands remain isolated from production write operations.
 
 ## Commands
 
@@ -347,6 +394,7 @@ erp-doctor system
 erp-doctor sql
 erp-doctor http
 erp-doctor iis
+erp-doctor eventlog
 ```
 
 Common options:
@@ -372,21 +420,22 @@ Configuration drift options:
 
 Production support tools should be boring and predictable.
 
-ERP Doctor v0.6 follows these rules:
+ERP Doctor v0.7 follows these rules:
 
 1. Diagnostics and growth queries are read-only toward the ERP/database.
 2. No automatic database repair or shrink.
 3. No automatic SQL session kill.
 4. No automatic IIS site/AppPool restart or binding/path modification.
-5. Configuration supports environment-variable secrets.
-6. Support bundles sanitize secret-like report data before writing output.
-7. The source configuration file is not included in support bundles.
-8. Growth history is ERP Doctor local state and never creates objects in SQL Server.
-9. Configuration drift reads local JSON only and never prints or hashes sensitive values.
-10. IIS site checks inspect Windows/IIS state without rewriting IIS configuration.
-11. A diagnosis is presented as evidence-backed guidance, not absolute certainty.
+5. Windows Event Log collection queries/renders entries only; it never clears or changes channels.
+6. Configuration supports environment-variable secrets.
+7. Support bundles sanitize secret-like report data before writing output.
+8. The source configuration file is not included in support bundles.
+9. Growth history is ERP Doctor local state and never creates objects in SQL Server.
+10. Configuration drift reads local JSON only and never prints or hashes sensitive values.
+11. IIS site checks inspect Windows/IIS state without rewriting IIS configuration.
+12. A diagnosis is presented as evidence-backed guidance, not absolute certainty.
 
-Some SQL dynamic management views require additional SQL Server permissions. If a check cannot run, ERP Doctor reports the check as an error instead of attempting privilege escalation.
+Some SQL dynamic management views and Windows Event Log channels require additional permissions. If a check cannot run, ERP Doctor reports the check as an error instead of attempting privilege escalation.
 
 ## Roadmap
 
@@ -438,8 +487,15 @@ Some SQL dynamic management views require additional SQL Server permissions. If 
 - [x] Dependency-free `Microsoft.Web.Administration` inspection
 - [x] IIS site evaluator regression tests
 
+### v0.7
+- [x] `erp-doctor eventlog` command
+- [x] Native read-only Windows Event Log collector
+- [x] Lookback/max-event/provider filters
+- [x] Event XML parsing with EventData fallback
+- [x] Secret-like event text redaction and truncation
+- [x] Event Log parser/evaluator regression tests
+
 ### Next
-- [ ] Windows Event Log collector
 - [ ] Plugin SDK
 - [ ] PostgreSQL, Linux/Nginx, Docker, Redis providers
 

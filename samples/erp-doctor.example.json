@@ -33,6 +33,22 @@
       }
     ]
   },
+  "windowsEventLog": {
+    "queries": [
+      {
+        "name": "ERP application errors",
+        "logName": "Application",
+        "lookbackMinutes": 60,
+        "maxEvents": 20,
+        "includeWarnings": false,
+        "providers": [
+          ".NET Runtime",
+          "Application Error",
+          "IIS AspNetCore Module V2"
+        ]
+      }
+    ]
+  },
   "system": {
     "diskWarningFreePercent": 15,
     "diskCriticalFreePercent": 5,
