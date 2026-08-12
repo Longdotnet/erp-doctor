@@ -46,6 +46,49 @@ ERP Doctor keeps those signals in one run so support/developers can reason about
 
 ## Install
 
+ERP Doctor supports source/global-tool workflows plus checksum-verified self-contained installers for **Windows x64** and **Linux x64**.
+
+### Checksum-verified self-contained installer (v0.15)
+
+The installer scripts download a platform release archive and `checksums.txt`, verify SHA256 **before extraction**, then install the self-contained binary. A .NET SDK/runtime is not required on the target machine.
+
+The first public GitHub Release has not been created yet. After a release exists, download/review the matching `install.ps1` or `install.sh` release asset and run it.
+
+Windows PowerShell / PowerShell 7:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+Linux:
+
+```bash
+bash install.sh
+```
+
+Specific version:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -Version v0.15.0
+```
+
+```bash
+bash install.sh --version v0.15.0
+```
+
+Defaults:
+
+```text
+Windows: %LOCALAPPDATA%\Programs\erp-doctor
+Linux:   ~/.local/bin
+```
+
+Windows updates the current user's PATH unless `-NoPathUpdate` is supplied. Linux deliberately does not edit shell startup files.
+
+Both scripts also accept local archive/checksum paths for offline use and CI. Windows CI verifies that a deliberately wrong checksum is rejected; release dry-runs install and execute the packaged Linux binary.
+
+See [`docs/installing.md`](docs/installing.md).
+
 ### From source
 
 ```bash
@@ -65,15 +108,15 @@ dotnet run --project src/ErpDoctor.Cli -- check --config erp-doctor.json
 
 ERP Doctor is packaged as `ErpDoctor.Tool`. CI installs the packed tool into a clean temporary path and runs `erp-doctor --help` on every change.
 
-When the package is available on NuGet.org:
+When the package is published to NuGet.org:
 
 ```bash
 dotnet tool install --global ErpDoctor.Tool
 ```
 
-### Self-contained release archives
+### Release assets
 
-The release pipeline creates:
+The release pipeline is validated to create:
 
 ```text
 erp-doctor-win-x64.zip
@@ -83,12 +126,14 @@ erp-doctor-plugin-docker.zip
 erp-doctor-plugin-nginx.zip
 erp-doctor-plugin-redis.zip
 erp-doctor-plugin-rabbitmq.zip
+install.ps1
+install.sh
 ErpDoctor.Tool.<version>.nupkg
 ErpDoctor.PluginSdk.<version>.nupkg
 checksums.txt
 ```
 
-Windows/Linux archives are self-contained; provider plugins are separate trust/install boundaries. See [`docs/releasing.md`](docs/releasing.md).
+Windows/Linux archives are self-contained; provider plugins are separate trust/install boundaries. Every distributed archive/package/installer is covered by `checksums.txt`. See [`docs/releasing.md`](docs/releasing.md).
 
 ## First run
 
@@ -165,7 +210,7 @@ erp-doctor plugin --config samples/redis-plugin.example.json
 
 See [`docs/redis-plugin.md`](docs/redis-plugin.md).
 
-### RabbitMQ (v0.14)
+### RabbitMQ
 
 `ErpDoctor.Plugin.RabbitMq` contributes:
 
@@ -177,17 +222,13 @@ plugin.rabbitmq.queues
 
 It uses the RabbitMQ Management HTTP API with **GET-only** requests to overview, nodes, and a paginated queue list. Passwords are resolved from an environment variable and the Basic Authorization header is created only in memory.
 
-```powershell
-$env:ERP_DOCTOR_RABBITMQ_PASSWORD="your-secret"
-```
+Node checks treat down nodes, memory/disk alarms, and network partitions as Critical. Queue checks evaluate ready/unacknowledged backlog thresholds and can optionally warn on ready messages with zero consumers. Queue scans are bounded to one page with `maxQueues` hard-capped at 500.
+
+The provider does not export definitions, retrieve/requeue message payloads, publish, purge/delete queues, mutate topology/users/permissions/policies, or close connections.
 
 ```bash
 erp-doctor plugin --config samples/rabbitmq-plugin.example.json
 ```
-
-Node checks treat down nodes, memory/disk alarms, and network partitions as Critical. Queue checks evaluate ready/unacknowledged backlog thresholds and can optionally warn on ready messages with zero consumers. Queue scans are bounded to one page with `maxQueues` hard-capped at 500.
-
-The provider does not export definitions, retrieve/requeue message payloads, publish, purge/delete queues, mutate topology/users/permissions/policies, or close connections. Failed HTTP response bodies and Authorization data are not copied into evidence.
 
 See [`docs/rabbitmq-plugin.md`](docs/rabbitmq-plugin.md).
 
@@ -259,15 +300,18 @@ See [`docs/plugin-sdk.md`](docs/plugin-sdk.md).
 
 ## Release validation
 
-Every release runs restore → build → test → package. Dry runs additionally prove:
+Every release runs restore → build → test → package. Dry-runs additionally prove:
 
 - self-contained Windows/Linux publish,
 - standalone Linux `--help`,
 - standalone loading of PostgreSQL (4), Docker (3), Nginx (3), Redis (5), and RabbitMQ (3) checks,
 - provider archive creation,
-- SHA256 verification.
+- SHA256 verification for platform/provider/NuGet/installer assets,
+- Linux installer installation/execution from the packaged release.
 
-Branch/manual dry runs cannot create a GitHub Release or publish NuGet; publishing is guarded to real tag pushes only.
+Windows CI separately runs `install.ps1` under Windows PowerShell, requires an invalid checksum to be rejected, then verifies a valid archive can be installed and executed.
+
+Branch/manual dry-runs cannot create a GitHub Release or publish NuGet; publishing is guarded to real tag pushes only.
 
 ## Architecture
 
@@ -296,7 +340,7 @@ Branch/manual dry runs cannot create a GitHub Release or publish NuGet; publishi
 
 ## Safety model
 
-Current built-in/provider diagnostics follow these principles:
+Current built-in/provider/installer behavior follows these principles:
 
 1. No automatic ERP/database repair or data mutation.
 2. No automatic SQL Server session kill.
@@ -310,7 +354,8 @@ Current built-in/provider diagnostics follow these principles:
 10. Docker provider never changes container/engine state.
 11. Nginx provider never reloads/stops Nginx or dumps the full config.
 12. Permission/CLI/API failures become diagnostics instead of privilege escalation.
-13. Third-party plugins remain a separate executable-code trust boundary.
+13. Self-contained installers verify SHA256 before extraction; Windows does not clear custom destination directories and Linux does not modify shell startup files.
+14. Third-party plugins remain a separate executable-code trust boundary.
 
 ## Roadmap
 
@@ -330,11 +375,12 @@ Completed:
 - [x] v0.12 Linux/Nginx provider
 - [x] v0.13 Redis provider
 - [x] v0.14 RabbitMQ provider
+- [x] v0.15 checksum-verified Windows/Linux installer UX
 
 Next:
 
+- [ ] First public release/tag after explicit maintainer approval
 - [ ] Broader cross-platform system diagnostics
-- [ ] Installer UX based on release feedback
 - [ ] Optional machine-readable integration/MCP surface after provider feedback
 - [ ] Additional providers driven by real incidents/contributor demand
 

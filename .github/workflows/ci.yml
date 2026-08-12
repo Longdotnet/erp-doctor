@@ -56,3 +56,53 @@ jobs:
             --version 0.0.0-ci `
             --add-source "$PWD/artifacts/nuget"
           & .\artifacts\tool-smoke\erp-doctor.exe --help
+
+      - name: Validate installer script syntax and help
+        shell: powershell
+        run: |
+          & .\scripts\install.ps1 -Help | Out-Host
+          bash -n scripts/install.sh
+          bash scripts/install.sh --help
+
+      - name: Smoke test Windows installer with local release artifact
+        shell: powershell
+        run: |
+          $source = Join-Path $PWD "src/ErpDoctor.Cli/bin/Release/net8.0"
+          $packageDir = Join-Path $PWD "artifacts/installer-package"
+          $archive = Join-Path $PWD "artifacts/erp-doctor-win-x64.zip"
+          $checksums = Join-Path $PWD "artifacts/checksums.txt"
+          $badChecksums = Join-Path $PWD "artifacts/bad-checksums.txt"
+          $installDir = Join-Path $PWD "artifacts/installer-smoke"
+          $badInstallDir = Join-Path $PWD "artifacts/installer-bad-checksum"
+
+          New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
+          Copy-Item -Path (Join-Path $source "*") -Destination $packageDir -Recurse -Force
+          Compress-Archive -Path (Join-Path $packageDir "*") -DestinationPath $archive -Force
+
+          $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content -LiteralPath $checksums -Value "$hash  erp-doctor-win-x64.zip" -NoNewline
+          Set-Content -LiteralPath $badChecksums -Value "$('0' * 64)  erp-doctor-win-x64.zip" -NoNewline
+
+          $badChecksumRejected = $false
+          try {
+            & .\scripts\install.ps1 `
+              -ArchivePath $archive `
+              -ChecksumsPath $badChecksums `
+              -InstallDir $badInstallDir `
+              -NoPathUpdate
+          }
+          catch {
+            $badChecksumRejected = $true
+          }
+
+          if (-not $badChecksumRejected) {
+            throw "Windows installer accepted an invalid SHA256 checksum."
+          }
+
+          & .\scripts\install.ps1 `
+            -ArchivePath $archive `
+            -ChecksumsPath $checksums `
+            -InstallDir $installDir `
+            -NoPathUpdate
+
+          & (Join-Path $installDir "erp-doctor.exe") --help

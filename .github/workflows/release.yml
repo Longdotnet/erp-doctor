@@ -11,7 +11,7 @@ on:
       version:
         description: "SemVer used for a packaging dry run (no release is created)"
         required: true
-        default: "0.14.0-dev.1"
+        default: "0.15.0-dev.1"
 
 permissions:
   contents: write
@@ -41,7 +41,7 @@ jobs:
           elif [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
             VERSION="$INPUT_VERSION"
           else
-            VERSION="0.14.0-dev.${GITHUB_RUN_NUMBER}"
+            VERSION="0.15.0-dev.${GITHUB_RUN_NUMBER}"
           fi
 
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
@@ -117,7 +117,6 @@ jobs:
             --configuration Release \
             --output artifacts/postgres-plugin \
             -p:Version="$VERSION"
-
           cp docs/postgres-plugin.md artifacts/postgres-plugin/README.md
           cp samples/postgres-plugin.example.json artifacts/postgres-plugin/postgres-plugin.example.json
           cp LICENSE artifacts/postgres-plugin/LICENSE
@@ -130,7 +129,6 @@ jobs:
             --configuration Release \
             --output artifacts/docker-plugin \
             -p:Version="$VERSION"
-
           cp docs/docker-plugin.md artifacts/docker-plugin/README.md
           cp samples/docker-plugin.example.json artifacts/docker-plugin/docker-plugin.example.json
           cp LICENSE artifacts/docker-plugin/LICENSE
@@ -143,7 +141,6 @@ jobs:
             --configuration Release \
             --output artifacts/nginx-plugin \
             -p:Version="$VERSION"
-
           cp docs/nginx-plugin.md artifacts/nginx-plugin/README.md
           cp samples/nginx-plugin.example.json artifacts/nginx-plugin/nginx-plugin.example.json
           cp LICENSE artifacts/nginx-plugin/LICENSE
@@ -156,7 +153,6 @@ jobs:
             --configuration Release \
             --output artifacts/redis-plugin \
             -p:Version="$VERSION"
-
           cp docs/redis-plugin.md artifacts/redis-plugin/README.md
           cp samples/redis-plugin.example.json artifacts/redis-plugin/redis-plugin.example.json
           cp LICENSE artifacts/redis-plugin/LICENSE
@@ -169,7 +165,6 @@ jobs:
             --configuration Release \
             --output artifacts/rabbitmq-plugin \
             -p:Version="$VERSION"
-
           cp docs/rabbitmq-plugin.md artifacts/rabbitmq-plugin/README.md
           cp samples/rabbitmq-plugin.example.json artifacts/rabbitmq-plugin/rabbitmq-plugin.example.json
           cp LICENSE artifacts/rabbitmq-plugin/LICENSE
@@ -179,7 +174,6 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x artifacts/linux-x64/ErpDoctor.Cli
-
           artifacts/linux-x64/ErpDoctor.Cli --help > /dev/null
 
           cat > artifacts/plugin-smoke.json <<JSON
@@ -255,6 +249,9 @@ jobs:
             zip -q -r ../release/erp-doctor-plugin-rabbitmq.zip .
           )
 
+          cp scripts/install.ps1 artifacts/release/install.ps1
+          cp scripts/install.sh artifacts/release/install.sh
+          chmod +x artifacts/release/install.sh
           cp artifacts/nuget/*.nupkg artifacts/release/
 
           (
@@ -267,6 +264,8 @@ jobs:
               erp-doctor-plugin-nginx.zip \
               erp-doctor-plugin-redis.zip \
               erp-doctor-plugin-rabbitmq.zip \
+              install.ps1 \
+              install.sh \
               *.nupkg > checksums.txt
           )
 
@@ -276,6 +275,17 @@ jobs:
           set -euo pipefail
           cd artifacts/release
           sha256sum -c checksums.txt
+
+      - name: Smoke test Linux installer with packaged release
+        shell: bash
+        run: |
+          set -euo pipefail
+          INSTALL_DIR="$GITHUB_WORKSPACE/artifacts/installer-smoke-linux"
+          bash scripts/install.sh \
+            --archive artifacts/release/erp-doctor-linux-x64.tar.gz \
+            --checksums artifacts/release/checksums.txt \
+            --install-dir "$INSTALL_DIR"
+          "$INSTALL_DIR/erp-doctor" --help > /dev/null
 
       - name: Upload packaged release artifacts
         uses: actions/upload-artifact@v7

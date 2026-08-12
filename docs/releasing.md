@@ -14,12 +14,16 @@ erp-doctor-plugin-docker.zip
 erp-doctor-plugin-nginx.zip
 erp-doctor-plugin-redis.zip
 erp-doctor-plugin-rabbitmq.zip
+install.ps1
+install.sh
 ErpDoctor.Tool.<version>.nupkg
 ErpDoctor.PluginSdk.<version>.nupkg
 checksums.txt
 ```
 
 The Windows and Linux archives are self-contained .NET 8 builds. PostgreSQL, Docker, Linux/Nginx, Redis, and RabbitMQ are shipped as separate provider bundles because plugins remain an explicit trust/install boundary.
+
+`install.ps1` and `install.sh` are release assets too. Both scripts verify the platform archive SHA256 before extraction, and both installer files are themselves included in `checksums.txt`.
 
 ## Dry run
 
@@ -28,7 +32,7 @@ The Release workflow supports `workflow_dispatch` for manual packaging validatio
 Use a development SemVer such as:
 
 ```text
-0.14.0-dev.1
+0.15.0-dev.1
 ```
 
 A dry run:
@@ -39,23 +43,27 @@ A dry run:
 - publishes PostgreSQL, Docker, Linux/Nginx, Redis, and RabbitMQ provider bundles,
 - runs the standalone Linux binary,
 - verifies that the standalone binary can discover all bundled provider DLLs with expected check counts,
+- packages `install.ps1` and `install.sh`,
 - creates ZIP/tar archives,
-- generates and verifies SHA256 checksums,
+- generates and verifies SHA256 checksums for every distributed archive/package/installer,
+- runs the Linux installer against the packaged Linux archive and executes the installed binary,
 - uploads the files as a workflow artifact,
 - does **not** create a GitHub Release,
 - does **not** publish to NuGet.org.
+
+Normal Windows CI additionally runs the installer under Windows PowerShell, verifies that an intentionally bad checksum is rejected, installs from a valid local archive/checksum pair, and runs the installed `erp-doctor.exe --help`.
 
 This is the required validation path before creating a release tag.
 
 ## Real release
 
-A tag matching `v*.*.*` triggers the same pipeline and then creates a GitHub Release.
+A tag matching `v*.*.*` triggers the same release pipeline and then creates a GitHub Release.
 
 Example:
 
 ```bash
-git tag v0.14.0
-git push origin v0.14.0
+git tag v0.15.0
+git push origin v0.15.0
 ```
 
 The release tag is the source of truth for published package versions. The workflow passes `-p:Version=<tag-version>` to build/pack/publish.
@@ -105,6 +113,25 @@ Release smoke testing verifies the self-contained ERP Doctor binary can load:
 
 The smoke test validates provider discovery/loading only. It does not execute provider diagnostics against live services. Live-service permissions, authentication, management endpoints, and availability remain deployment-specific runtime concerns.
 
+## Installer validation
+
+The installer scripts support both normal GitHub Release downloads and local archive/checksum inputs used by CI.
+
+Windows CI validates:
+
+- Windows PowerShell compatibility,
+- help/syntax path,
+- invalid SHA256 rejection,
+- valid SHA256 acceptance,
+- extraction/copy into an isolated install directory,
+- execution of the installed binary.
+
+Release dry-run validates Linux with the actual self-contained release tarball and the generated release `checksums.txt`.
+
+Installer validation does not mutate the runner's global machine configuration. Windows uses `-NoPathUpdate` in CI; Linux uses an isolated install directory.
+
+See [`installing.md`](installing.md).
+
 ## NuGet.org publishing
 
 If the repository has an Actions secret named `NUGET_API_KEY`, a real tag release additionally pushes:
@@ -120,7 +147,7 @@ If the secret is absent, NuGet publishing is skipped without blocking GitHub Rel
 
 ## Checksums
 
-`checksums.txt` contains SHA256 entries for every distributed archive/package and is verified inside the workflow before artifact upload.
+`checksums.txt` contains SHA256 entries for every distributed archive/package/installer and is verified inside the workflow before artifact upload.
 
 ```bash
 sha256sum -c checksums.txt
@@ -136,12 +163,13 @@ Get-FileHash .\erp-doctor-win-x64.zip -Algorithm SHA256
 
 Before a real release:
 
-1. `main` CI is green.
-2. A Release dry run for the intended version is green.
+1. `main` CI is green, including Windows installer validation.
+2. A Release dry run for the intended version is green, including Linux installer validation.
 3. Self-contained Windows/Linux publishes pass.
 4. PostgreSQL, Docker, Nginx, Redis, and RabbitMQ provider archives are present.
 5. The standalone Linux binary discovers all five providers with expected check counts.
-6. Every checksum verifies.
-7. README/config examples contain no customer-specific secrets/data.
-8. Every bundled provider is intentionally included.
-9. Only then create/push the release tag.
+6. `install.ps1`, `install.sh`, and every other release asset have entries in `checksums.txt`.
+7. Every checksum verifies.
+8. README/config/install examples contain no customer-specific secrets/data.
+9. Every bundled provider is intentionally included.
+10. Only then create/push the release tag.
