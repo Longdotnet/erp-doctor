@@ -1,0 +1,197 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "SemVer used for a packaging dry run (no release is created)"
+        required: true
+        default: "0.10.0-dev.1"
+
+permissions:
+  contents: write
+
+jobs:
+  package-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Resolve and validate version
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="$INPUT_VERSION"
+          fi
+
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+            echo "Invalid version: $VERSION"
+            exit 1
+          fi
+
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "Packaging ERP Doctor $VERSION"
+
+      - name: Restore
+        run: dotnet restore ErpDoctor.sln
+
+      - name: Build
+        run: dotnet build ErpDoctor.sln --configuration Release --no-restore -p:Version="$VERSION"
+
+      - name: Test
+        run: dotnet test ErpDoctor.sln --configuration Release --no-build -p:Version="$VERSION"
+
+      - name: Pack global tool and Plugin SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/nuget
+
+          dotnet pack src/ErpDoctor.Cli/ErpDoctor.Cli.csproj \
+            --configuration Release \
+            --no-build \
+            --output artifacts/nuget \
+            -p:Version="$VERSION"
+
+          dotnet pack src/ErpDoctor.PluginSdk/ErpDoctor.PluginSdk.csproj \
+            --configuration Release \
+            --no-build \
+            --output artifacts/nuget \
+            -p:Version="$VERSION"
+
+      - name: Publish standalone Windows x64
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet publish src/ErpDoctor.Cli/ErpDoctor.Cli.csproj \
+            --configuration Release \
+            --runtime win-x64 \
+            --self-contained true \
+            --output artifacts/win-x64 \
+            -p:Version="$VERSION" \
+            -p:PublishSingleFile=true \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:DebugType=None \
+            -p:DebugSymbols=false
+
+      - name: Publish standalone Linux x64
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet publish src/ErpDoctor.Cli/ErpDoctor.Cli.csproj \
+            --configuration Release \
+            --runtime linux-x64 \
+            --self-contained true \
+            --output artifacts/linux-x64 \
+            -p:Version="$VERSION" \
+            -p:PublishSingleFile=true \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:DebugType=None \
+            -p:DebugSymbols=false
+
+      - name: Publish PostgreSQL plugin bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet publish plugins/ErpDoctor.Plugin.Postgres/ErpDoctor.Plugin.Postgres.csproj \
+            --configuration Release \
+            --output artifacts/postgres-plugin \
+            -p:Version="$VERSION"
+
+          cp docs/postgres-plugin.md artifacts/postgres-plugin/README.md
+          cp samples/postgres-plugin.example.json artifacts/postgres-plugin/postgres-plugin.example.json
+          cp LICENSE artifacts/postgres-plugin/LICENSE
+
+      - name: Build release archives and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/release
+
+          cp LICENSE artifacts/win-x64/LICENSE
+          cp samples/erp-doctor.example.json artifacts/win-x64/erp-doctor.example.json
+          cp LICENSE artifacts/linux-x64/LICENSE
+          cp samples/erp-doctor.example.json artifacts/linux-x64/erp-doctor.example.json
+
+          (
+            cd artifacts/win-x64
+            zip -q -r ../release/erp-doctor-win-x64.zip .
+          )
+
+          tar -czf artifacts/release/erp-doctor-linux-x64.tar.gz \
+            -C artifacts/linux-x64 .
+
+          (
+            cd artifacts/postgres-plugin
+            zip -q -r ../release/erp-doctor-plugin-postgres.zip .
+          )
+
+          cp artifacts/nuget/*.nupkg artifacts/release/
+
+          (
+            cd artifacts/release
+            sha256sum \
+              erp-doctor-win-x64.zip \
+              erp-doctor-linux-x64.tar.gz \
+              erp-doctor-plugin-postgres.zip \
+              *.nupkg > checksums.txt
+          )
+
+      - name: Upload packaged release artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: erp-doctor-${{ env.VERSION }}
+          path: artifacts/release/*
+          if-no-files-found: error
+
+      - name: Create GitHub release
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            artifacts/release/* \
+            --verify-tag \
+            --generate-notes \
+            --title "ERP Doctor $GITHUB_REF_NAME"
+
+      - name: Publish NuGet packages when API key is configured
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$NUGET_API_KEY" ]]; then
+            echo "NUGET_API_KEY is not configured; skipping NuGet.org publish."
+            exit 0
+          fi
+
+          dotnet nuget push "artifacts/nuget/ErpDoctor.Tool.$VERSION.nupkg" \
+            --api-key "$NUGET_API_KEY" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+
+          dotnet nuget push "artifacts/nuget/ErpDoctor.PluginSdk.$VERSION.nupkg" \
+            --api-key "$NUGET_API_KEY" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
