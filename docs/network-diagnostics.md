@@ -118,13 +118,13 @@ Each target is explicitly configured. ERP Doctor does not discover or scan neigh
 Useful examples include:
 
 ```text
-SQL Server       1433
-PostgreSQL       5432
-Redis            6379
-RabbitMQ AMQP    5672
-RabbitMQ HTTPS   15672 or deployment-specific management port
-HTTP             80
-HTTPS            443
+SQL Server             1433
+PostgreSQL             5432
+Redis                  6379
+RabbitMQ AMQP          5672
+RabbitMQ management    15672 (default HTTP; TLS port is deployment-specific)
+HTTP                   80
+HTTPS                  443
 ```
 
 Use the actual port configured in your environment rather than assuming these defaults.
