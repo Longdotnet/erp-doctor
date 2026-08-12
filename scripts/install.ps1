@@ -116,8 +116,15 @@ try {
     }
 
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+    Get-ChildItem -LiteralPath $InstallDir -Force -ErrorAction SilentlyContinue |
+        Remove-Item -Recurse -Force
+    Copy-Item -Path (Join-Path $extractDir "*") -Destination $InstallDir -Recurse -Force
+
+    $installedSourceExe = Join-Path $InstallDir (Split-Path -Leaf $sourceExe)
     $destinationExe = Join-Path $InstallDir "erp-doctor.exe"
-    Copy-Item -LiteralPath $sourceExe -Destination $destinationExe -Force
+    if (-not [string]::Equals($installedSourceExe, $destinationExe, [StringComparison]::OrdinalIgnoreCase)) {
+        Copy-Item -LiteralPath $installedSourceExe -Destination $destinationExe -Force
+    }
 
     if (-not $NoPathUpdate) {
         $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
