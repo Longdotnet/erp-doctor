@@ -75,6 +75,7 @@ public sealed class SqlGrowthHistoryTests
         var path = Path.Combine(
             Path.GetTempPath(),
             $"erp-doctor-growth-{Guid.NewGuid():N}.json");
+        var cancellationToken = TestContext.Current.CancellationToken;
 
         try
         {
@@ -88,14 +89,14 @@ public sealed class SqlGrowthHistoryTests
                     maxSnapshots: 3);
             }
 
-            var savedPath = await store.SaveAsync(path, history);
-            var loaded = await store.LoadAsync(savedPath);
+            var savedPath = await store.SaveAsync(path, history, cancellationToken);
+            var loaded = await store.LoadAsync(savedPath, cancellationToken);
 
             Assert.Equal(3, loaded.Snapshots.Count);
             Assert.Equal(2, loaded.Snapshots[0].CapturedAtUtc.Day);
             Assert.Equal(4, loaded.Snapshots[^1].CapturedAtUtc.Day);
 
-            var raw = await File.ReadAllTextAsync(savedPath);
+            var raw = await File.ReadAllTextAsync(savedPath, cancellationToken);
             Assert.False(raw.Contains("connectionString", StringComparison.OrdinalIgnoreCase));
             Assert.False(raw.Contains("password", StringComparison.OrdinalIgnoreCase));
         }
