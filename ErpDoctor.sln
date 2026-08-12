@@ -18,6 +18,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ErpDoctor.SamplePlugin", "s
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ErpDoctor.Plugin.Postgres", "plugins\ErpDoctor.Plugin.Postgres\ErpDoctor.Plugin.Postgres.csproj", "{E2F2DB9B-6B1B-4C9B-9E31-0A7EB5A4D904}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ErpDoctor.Plugin.Docker", "plugins\ErpDoctor.Plugin.Docker\ErpDoctor.Plugin.Docker.csproj", "{D0C4E7B1-7DAE-4CF2-97E7-3C7F8347EA11}"
+EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ErpDoctor.Tests", "tests\ErpDoctor.Tests\ErpDoctor.Tests.csproj", "{A5B76B8C-FEF2-4F68-9C58-3EC59B20C4A0}"
 EndProject
 Global
@@ -58,6 +60,10 @@ Global
 		{E2F2DB9B-6B1B-4C9B-9E31-0A7EB5A4D904}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{E2F2DB9B-6B1B-4C9B-9E31-0A7EB5A4D904}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{E2F2DB9B-6B1B-4C9B-9E31-0A7EB5A4D904}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D0C4E7B1-7DAE-4CF2-97E7-3C7F8347EA11}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D0C4E7B1-7DAE-4CF2-97E7-3C7F8347EA11}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D0C4E7B1-7DAE-4CF2-97E7-3C7F8347EA11}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D0C4E7B1-7DAE-4CF2-97E7-3C7F8347EA11}.Release|Any CPU.Build.0 = Release|Any CPU
 		{A5B76B8C-FEF2-4F68-9C58-3EC59B20C4A0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{A5B76B8C-FEF2-4F68-9C58-3EC59B20C4A0}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A5B76B8C-FEF2-4F68-9C58-3EC59B20C4A0}.Release|Any CPU.ActiveCfg = Release|Any CPU
