@@ -32,7 +32,7 @@ The Release workflow supports `workflow_dispatch` for manual packaging validatio
 Use a development SemVer such as:
 
 ```text
-0.15.0-dev.1
+0.16.0-dev.1
 ```
 
 A dry run:
@@ -42,6 +42,7 @@ A dry run:
 - publishes self-contained `win-x64` and `linux-x64` builds,
 - publishes PostgreSQL, Docker, Linux/Nginx, Redis, and RabbitMQ provider bundles,
 - runs the standalone Linux binary,
+- verifies standalone Linux Network Doctor DNS/TCP behavior against a loopback listener,
 - verifies that the standalone binary can discover all bundled provider DLLs with expected check counts,
 - packages `install.ps1` and `install.sh`,
 - creates ZIP/tar archives,
@@ -62,8 +63,8 @@ A tag matching `v*.*.*` triggers the same release pipeline and then creates a Gi
 Example:
 
 ```bash
-git tag v0.15.0
-git push origin v0.15.0
+git tag v0.16.0
+git push origin v0.16.0
 ```
 
 The release tag is the source of truth for published package versions. The workflow passes `-p:Version=<tag-version>` to build/pack/publish.
@@ -111,7 +112,19 @@ Release smoke testing verifies the self-contained ERP Doctor binary can load:
 - Redis: 5 checks,
 - RabbitMQ: 3 checks.
 
-The smoke test validates provider discovery/loading only. It does not execute provider diagnostics against live services. Live-service permissions, authentication, management endpoints, and availability remain deployment-specific runtime concerns.
+The provider smoke test validates discovery/loading only. It does not execute provider diagnostics against live services. Live-service permissions, authentication, management endpoints, and availability remain deployment-specific runtime concerns.
+
+## Network Doctor validation
+
+The Linux release dry-run also starts a loopback-only temporary listener and executes:
+
+```bash
+erp-doctor network --config artifacts/network-smoke.json
+```
+
+The configured target uses `127.0.0.1` and a fixed CI-only port. The command must complete successfully, proving that the self-contained Linux artifact can perform both built-in DNS and TCP diagnostics without shell/network-tool dependencies.
+
+The listener exists only for the workflow step and is terminated automatically when the step exits.
 
 ## Installer validation
 
@@ -164,12 +177,13 @@ Get-FileHash .\erp-doctor-win-x64.zip -Algorithm SHA256
 Before a real release:
 
 1. `main` CI is green, including Windows installer validation.
-2. A Release dry run for the intended version is green, including Linux installer validation.
+2. A Release dry run for the intended version is green, including Linux installer and Network Doctor loopback validation.
 3. Self-contained Windows/Linux publishes pass.
 4. PostgreSQL, Docker, Nginx, Redis, and RabbitMQ provider archives are present.
 5. The standalone Linux binary discovers all five providers with expected check counts.
-6. `install.ps1`, `install.sh`, and every other release asset have entries in `checksums.txt`.
-7. Every checksum verifies.
-8. README/config/install examples contain no customer-specific secrets/data.
-9. Every bundled provider is intentionally included.
-10. Only then create/push the release tag.
+6. The standalone Linux binary passes the DNS/TCP Network Doctor loopback smoke.
+7. `install.ps1`, `install.sh`, and every other release asset have entries in `checksums.txt`.
+8. Every checksum verifies.
+9. README/config/install examples contain no customer-specific secrets/data.
+10. Every bundled provider is intentionally included.
+11. Only then create/push the release tag.
