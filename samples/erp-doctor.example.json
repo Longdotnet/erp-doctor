@@ -68,6 +68,12 @@
   "system": {
     "diskWarningFreePercent": 15,
     "diskCriticalFreePercent": 5,
-    "memoryWarningAvailablePercent": 15
+    "memoryWarningAvailablePercent": 15,
+    "cpuWarningPercent": 80,
+    "cpuCriticalPercent": 95,
+    "cpuSampleMilliseconds": 250,
+    "loadPerCpuWarning": 1.0,
+    "loadPerCpuCritical": 2.0,
+    "topProcessesLimit": 5
   }
 }

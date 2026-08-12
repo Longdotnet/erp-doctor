@@ -77,6 +77,25 @@ public sealed class DiagnosisEngine
                 ]));
         }
 
+        var cpuPressure = results.FirstOrDefault(x =>
+            x.CheckId == "system.cpu" &&
+            x.Status is DiagnosticStatus.Warning or DiagnosticStatus.Critical);
+
+        if (cpuPressure is not null && slowHttp is not null)
+        {
+            diagnoses.Add(new Diagnosis(
+                DiagnosticStatus.Warning,
+                "Host CPU pressure may be degrading API response time",
+                "System CPU pressure was elevated while an HTTP endpoint responded slowly. This is correlation, not proof; use the process and load evidence to determine whether application, database, or other host workload is consuming CPU.",
+                [cpuPressure.Summary, slowHttp.Summary],
+                [
+                    "Inspect the bounded system.processes snapshot for memory-heavy processes and use OS tooling to confirm CPU-heavy processes if pressure persists.",
+                    "On Linux, compare the 1/5/15-minute load averages to distinguish a short CPU spike from sustained CPU or I/O pressure.",
+                    "Avoid restarting services solely from one short CPU sample; re-run diagnostics and confirm sustained pressure.",
+                    "Re-test the HTTP endpoint after resource pressure subsides."
+                ]));
+        }
+
         return diagnoses;
     }
 

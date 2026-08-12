@@ -11,7 +11,7 @@ on:
       version:
         description: "SemVer used for a packaging dry run (no release is created)"
         required: true
-        default: "0.16.0-dev.1"
+        default: "0.17.0-dev.1"
 
 permissions:
   contents: write
@@ -41,7 +41,7 @@ jobs:
           elif [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
             VERSION="$INPUT_VERSION"
           else
-            VERSION="0.16.0-dev.${GITHUB_RUN_NUMBER}"
+            VERSION="0.17.0-dev.${GITHUB_RUN_NUMBER}"
           fi
 
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
@@ -198,7 +198,8 @@ jobs:
           grep -F "docker" <<< "$PLUGIN_OUTPUT"
           grep -F "checks   : 3" <<< "$PLUGIN_OUTPUT"
           grep -F "nginx" <<< "$PLUGIN_OUTPUT"
-          grep -F "Linux / Nginx Diagnostics" <<< "$PLUGIN_OUTPUT"
+          grep -F "Nginx Diagnostics" <<< "$PLUGIN_OUTPUT"
+          grep -F "checks   : 2" <<< "$PLUGIN_OUTPUT"
           grep -F "redis" <<< "$PLUGIN_OUTPUT"
           grep -F "Redis Diagnostics" <<< "$PLUGIN_OUTPUT"
           grep -F "checks   : 5" <<< "$PLUGIN_OUTPUT"
@@ -236,6 +237,47 @@ jobs:
           NETWORK_OUTPUT="$(artifacts/linux-x64/ErpDoctor.Cli network --config artifacts/network-smoke.json)"
           echo "$NETWORK_OUTPUT"
           grep -F "Loopback network smoke" <<< "$NETWORK_OUTPUT"
+
+      - name: Smoke test standalone Linux system pressure diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cat > artifacts/system-pressure-smoke.json <<JSON
+          {
+            "system": {
+              "cpuWarningPercent": 100,
+              "cpuCriticalPercent": 100,
+              "cpuSampleMilliseconds": 100,
+              "loadPerCpuWarning": 100,
+              "loadPerCpuCritical": 200,
+              "topProcessesLimit": 3
+            }
+          }
+          JSON
+
+          set +e
+          SYSTEM_OUTPUT="$(artifacts/linux-x64/ErpDoctor.Cli system --config artifacts/system-pressure-smoke.json 2>&1)"
+          SYSTEM_EXIT=$?
+          set -e
+
+          if [[ "$SYSTEM_EXIT" -gt 1 ]]; then
+            echo "$SYSTEM_OUTPUT"
+            echo "Unexpected System Doctor exit code: $SYSTEM_EXIT"
+            exit 1
+          fi
+
+          echo "$SYSTEM_OUTPUT"
+          grep -F "System CPU" <<< "$SYSTEM_OUTPUT"
+          grep -F "System load average" <<< "$SYSTEM_OUTPUT"
+          grep -F "Top processes by memory" <<< "$SYSTEM_OUTPUT"
+
+          if grep -F "x System CPU" <<< "$SYSTEM_OUTPUT" || \
+             grep -F "x System load average" <<< "$SYSTEM_OUTPUT" || \
+             grep -F "x Top processes by memory" <<< "$SYSTEM_OUTPUT"; then
+            echo "A v0.17 system-pressure check returned Error."
+            exit 1
+          fi
 
       - name: Build release archives and checksums
         shell: bash

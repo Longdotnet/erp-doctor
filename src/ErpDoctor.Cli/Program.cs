@@ -251,6 +251,9 @@ internal static class ProgramEntry
         {
             new DotNetRuntimeCheck(),
             new MemoryCheck(),
+            new CpuUtilizationCheck(),
+            new LoadAverageCheck(),
+            new TopProcessesCheck(),
             new SqlConnectivityCheck(),
             new SqlDatabaseSizeCheck(),
             new SqlLargestTablesCheck(),
@@ -418,7 +421,7 @@ internal static class ProgramEntry
               bundle       Run all checks and write a sanitized ZIP support bundle by default.
               growth       Capture SQL database/table size and compare it with the previous local snapshot.
               config-diff  Compare two local JSON/appsettings files without printing secret values.
-              system       Inspect disk, memory, runtime, and OS information.
+              system       Inspect disk, memory, CPU/load pressure, top process working sets, runtime, and OS information.
               sql          Inspect SQL Server connectivity, size, largest tables, blocking, and long requests.
               http         Probe configured HTTP health endpoints.
               network      Resolve configured hosts and test TCP port reachability/latency cross-platform.

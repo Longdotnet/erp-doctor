@@ -11,16 +11,14 @@ namespace ErpDoctor.Tests;
 public sealed class NginxPluginTests
 {
     [Fact]
-    public void Settings_AreBoundedAndCriticalThresholdCannotFallBelowWarning()
+    public void Settings_AreBoundedAndTrimmed()
     {
         using var document = JsonDocument.Parse(
             """
             {
               "nginxExecutable": "  /usr/sbin/nginx  ",
               "configPath": "  /etc/nginx/nginx.conf  ",
-              "commandTimeoutSeconds": 999,
-              "loadPerCpuWarning": 3.5,
-              "loadPerCpuCritical": 1.0
+              "commandTimeoutSeconds": 999
             }
             """);
 
@@ -29,22 +27,20 @@ public sealed class NginxPluginTests
         Assert.Equal("/usr/sbin/nginx", settings.Executable);
         Assert.Equal("/etc/nginx/nginx.conf", settings.ConfigPath);
         Assert.Equal(60, settings.CommandTimeoutSeconds);
-        Assert.Equal(3.5d, settings.LoadPerCpuWarning);
-        Assert.Equal(3.5d, settings.LoadPerCpuCritical);
     }
 
     [Fact]
-    public void Plugin_RegistersLinuxRuntimeVersionAndConfigChecks()
+    public void Plugin_RegistersVersionAndConfigChecksOnly()
     {
         var plugin = new NginxPluginType();
 
         var checks = plugin.CreateChecks(
             new PluginContext(null, Environment.CurrentDirectory));
 
-        Assert.Equal(3, checks.Count);
-        Assert.Contains(checks, check => check.Id == "linux-runtime" && check.Category == "linux");
+        Assert.Equal(2, checks.Count);
         Assert.Contains(checks, check => check.Id == "version" && check.Category == "nginx");
         Assert.Contains(checks, check => check.Id == "config" && check.Category == "nginx");
+        Assert.DoesNotContain(checks, check => check.Id == "linux-runtime");
     }
 
     [Fact]
@@ -60,70 +56,11 @@ public sealed class NginxPluginTests
         var plugin = Assert.Single(discovery.Plugins);
         Assert.Empty(discovery.Issues);
         Assert.Equal("nginx", plugin.Id);
-        Assert.Equal(3, plugin.Checks.Count);
-        Assert.Contains(plugin.Checks, check => check.Id == "plugin.nginx.linux-runtime");
+        Assert.Equal(2, plugin.Checks.Count);
         Assert.Contains(plugin.Checks, check => check.Id == "plugin.nginx.version");
         Assert.Contains(plugin.Checks, check => check.Id == "plugin.nginx.config");
+        Assert.DoesNotContain(plugin.Checks, check => check.Id == "plugin.nginx.linux-runtime");
         Assert.All(plugin.Checks, check => Assert.Equal("plugin", check.Category));
-    }
-
-    [Fact]
-    public void LinuxSnapshotParser_ReadsDistributionLoadUptimeAndAvailableMemory()
-    {
-        const string osRelease = """
-            NAME="Ubuntu"
-            PRETTY_NAME="Ubuntu 24.04 LTS"
-            VERSION_ID="24.04"
-            """;
-        const string uptime = "7200.00 1000.00";
-        const string loadavg = "2.00 1.50 1.00 1/100 123";
-        const string meminfo = """
-            MemTotal:        8000000 kB
-            MemAvailable:    4000000 kB
-            """;
-
-        var snapshot = LinuxSnapshotParser.Parse(
-            osRelease,
-            uptime,
-            loadavg,
-            meminfo,
-            processorCount: 4);
-
-        Assert.Equal("Ubuntu 24.04 LTS", snapshot.Distribution);
-        Assert.Equal("24.04", snapshot.Version);
-        Assert.Equal(2d, snapshot.UptimeHours, 6);
-        Assert.Equal(2d, snapshot.Load1, 6);
-        Assert.Equal(1.5d, snapshot.Load5, 6);
-        Assert.Equal(1d, snapshot.Load15, 6);
-        Assert.Equal(4, snapshot.ProcessorCount);
-        Assert.True(snapshot.MemoryAvailablePercent.HasValue);
-        Assert.Equal(50d, snapshot.MemoryAvailablePercent.GetValueOrDefault(), 6);
-    }
-
-    [Fact]
-    public void LinuxSnapshotEvaluator_UsesLoadPerCpuThresholds()
-    {
-        var settings = new NginxSettings(
-            "nginx",
-            null,
-            10,
-            LoadPerCpuWarning: 1d,
-            LoadPerCpuCritical: 2d);
-
-        var healthy = LinuxSnapshotEvaluator.Evaluate(
-            Snapshot(load1: 2d, cpuCount: 4),
-            settings);
-        var warning = LinuxSnapshotEvaluator.Evaluate(
-            Snapshot(load1: 4d, cpuCount: 4),
-            settings);
-        var critical = LinuxSnapshotEvaluator.Evaluate(
-            Snapshot(load1: 8d, cpuCount: 4),
-            settings);
-
-        Assert.Equal(PluginDiagnosticStatus.Healthy, healthy.Status);
-        Assert.Equal(PluginDiagnosticStatus.Warning, warning.Status);
-        Assert.Equal(PluginDiagnosticStatus.Critical, critical.Status);
-        Assert.Equal("2.00", critical.EvidenceOrEmpty["load1PerCpu"]);
     }
 
     [Fact]
@@ -187,15 +124,4 @@ public sealed class NginxPluginTests
             Assert.Equal(PluginDiagnosticStatus.Skipped, result.Status);
         }
     }
-
-    private static LinuxRuntimeSnapshot Snapshot(double load1, int cpuCount) =>
-        new(
-            "Ubuntu 24.04 LTS",
-            "24.04",
-            10,
-            load1,
-            load1,
-            load1,
-            cpuCount,
-            50);
 }
