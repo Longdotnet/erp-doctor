@@ -1,0 +1,17 @@
+{
+  "plugins": {
+    "assemblies": [
+      "plugins/ErpDoctor.Plugin.Postgres/bin/Release/net8.0/ErpDoctor.Plugin.Postgres.dll"
+    ],
+    "settings": {
+      "postgres": {
+        "connectionStringEnvironmentVariable": "ERP_DOCTOR_POSTGRES",
+        "connectionTimeoutSeconds": 5,
+        "commandTimeoutSeconds": 10,
+        "databaseSizeWarningGb": 20,
+        "longRunningWarningSeconds": 30,
+        "blockingWarningSeconds": 10
+      }
+    }
+  }
+}

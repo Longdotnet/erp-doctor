@@ -6,9 +6,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4.svg)](https://dotnet.microsoft.com/)
 
-ERP Doctor is an open-source, evidence-first diagnostic CLI for the stack small ERP teams end up owning all at once: **Windows, IIS, .NET APIs, SQL Server, disks, memory, HTTP endpoints, Event Log, configuration drift, and now external diagnostic plugins**.
+ERP Doctor is an open-source, evidence-first diagnostic CLI for the stack small ERP teams end up owning all at once: **Windows, IIS, .NET APIs, SQL Server, PostgreSQL, disks, memory, HTTP endpoints, Event Log, and environment configuration**.
 
-The core idea is simple:
+The core idea:
 
 ```text
 CHECK -> COLLECT EVIDENCE -> CORRELATE -> DIAGNOSE -> RECOMMEND
@@ -22,11 +22,25 @@ erp-doctor check
 
 ## Why ERP Doctor?
 
-Traditional health checks usually answer one question: "is this endpoint alive?"
-
-ERP incidents are rarely that simple. A 503 may come from a stopped AppPool, critically low disk space, SQL blocking, configuration drift, or a failed .NET startup recorded in Event Log.
+A health endpoint can tell you that an API is down. It usually cannot tell you whether the real problem is a stopped AppPool, disk pressure, database blocking, config drift, a failed .NET startup, or a database that doubled in size over the last week.
 
 ERP Doctor collects those signals into one run and keeps the evidence together so the developer can reason about the **whole system**, not one component at a time.
+
+## What it can inspect
+
+| Area | Diagnostics |
+| --- | --- |
+| System | Fixed-disk free space, memory, .NET runtime, OS |
+| SQL Server | Connectivity, data/log size, largest tables, blocking, long-running requests |
+| SQL growth | Local historical snapshots, data/log deltas, MB/day, table/row growth |
+| PostgreSQL plugin | Connectivity, database size, long-running queries, blocking sessions |
+| IIS | AppPool state, site state, bindings, root physical path |
+| HTTP | Expected status code, timeout, latency threshold |
+| Windows Event Log | Recent Critical/Error entries, optional Warning/provider filters |
+| Configuration | Secret-safe JSON/appsettings drift between environments |
+| Reporting | Console, stable JSON, standalone HTML |
+| Support handoff | Sanitized ZIP bundle with JSON + HTML + manifest |
+| Plugin SDK | Explicit local DLL discovery and contributed diagnostic checks |
 
 ## Example
 
@@ -67,28 +81,14 @@ CRITICAL: Application unavailable with critically low disk space
   -> Re-run erp-doctor check after the root cause is resolved.
 ```
 
-## What it can inspect
-
-| Area | Diagnostics |
-| --- | --- |
-| System | Fixed-disk free space, memory, .NET runtime, OS |
-| SQL Server | Connectivity, data/log size, largest tables, blocking, long-running requests |
-| Database growth | Local historical snapshots, data/log deltas, MB/day, table/row growth |
-| IIS | AppPool state, site state, bindings, root physical path |
-| HTTP | Expected status code, timeout, latency threshold |
-| Windows Event Log | Recent Critical/Error events, optional Warning/provider filters |
-| Configuration | Secret-safe JSON/appsettings drift between environments |
-| Reporting | Console, stable JSON, standalone HTML |
-| Support handoff | Sanitized ZIP bundle with JSON + HTML + manifest |
-| Plugins | Explicit local DLL discovery and contributed diagnostic checks |
-
 ## Getting started from source
 
 Requirements:
 
 - .NET 8 SDK
 - Windows for IIS/Event Log diagnostics
-- SQL Server access for SQL diagnostics
+- SQL Server access for SQL Server diagnostics
+- PostgreSQL access only when using the optional PostgreSQL plugin
 
 ```bash
 git clone https://github.com/Longdotnet/erp-doctor.git
@@ -97,73 +97,23 @@ dotnet restore
 dotnet build ErpDoctor.sln
 ```
 
-Copy the example config:
+Copy the default config:
 
 ```powershell
 Copy-Item samples/erp-doctor.example.json erp-doctor.json
 ```
 
-Keep secrets out of the file. The example reads SQL credentials from an environment variable:
+Keep SQL Server credentials out of the file:
 
 ```powershell
 $env:ERP_DB="Server=localhost;Database=ERP;Integrated Security=True;TrustServerCertificate=True"
 ```
 
-Run all configured diagnostics:
+Run everything configured in the file:
 
 ```bash
 dotnet run --project src/ErpDoctor.Cli -- check --config erp-doctor.json
 ```
-
-## Configuration
-
-A compact example:
-
-```json
-{
-  "sqlServer": {
-    "connectionString": "${ERP_DB}",
-    "blockingWarningSeconds": 10,
-    "longRunningWarningSeconds": 30
-  },
-  "http": {
-    "endpoints": [
-      {
-        "name": "ERP API",
-        "url": "https://localhost:5001/health",
-        "expectedStatusCode": 200,
-        "latencyWarningMs": 1500
-      }
-    ]
-  },
-  "iis": {
-    "appPools": ["ErpApi"],
-    "sites": [
-      {
-        "name": "ERP Site",
-        "expectedBindings": ["https:*:443:erp.example.com"]
-      }
-    ]
-  },
-  "windowsEventLog": {
-    "queries": [
-      {
-        "name": "ERP application errors",
-        "logName": "Application",
-        "lookbackMinutes": 60,
-        "maxEvents": 20,
-        "providers": [".NET Runtime", "Application Error", "IIS AspNetCore Module V2"]
-      }
-    ]
-  },
-  "plugins": {
-    "assemblies": [],
-    "settings": {}
-  }
-}
-```
-
-See [`samples/erp-doctor.example.json`](samples/erp-doctor.example.json) for all current options.
 
 ## Commands
 
@@ -177,7 +127,7 @@ erp-doctor eventlog     Windows Event Log diagnostics only
 
 erp-doctor report       Generate a standalone HTML report
 erp-doctor bundle       Generate a sanitized support ZIP
-erp-doctor growth       Capture/compare local SQL growth history
+erp-doctor growth       Capture/compare local SQL Server growth history
 erp-doctor config-diff  Compare two JSON/appsettings files safely
 
 erp-doctor plugins      Discover configured plugins without running their checks
@@ -191,19 +141,21 @@ Common options:
 --json <path>     Write machine-readable diagnostic JSON
 --html <path>     Write standalone HTML
 --bundle <path>   Write sanitized support ZIP
---history <path>  Local JSON state for growth history
+--history <path>  Local JSON state for SQL Server growth history
 --help            Show CLI help
 ```
 
-## Database growth history
+## SQL Server diagnostics
 
-A one-time database size tells you the size, not **what grew**.
+Built-in SQL Server diagnostics include connectivity, database/data/log size, largest tables, blocking sessions, and long-running requests.
+
+Database growth can be tracked without creating anything in the customer database:
 
 ```bash
 erp-doctor growth --config erp-doctor.json
 ```
 
-First run creates a local baseline. Later runs report:
+The first run creates a local baseline. Later runs can show:
 
 ```text
 Database : SQL01/ERP_PROD
@@ -220,13 +172,74 @@ Table growth
 [dbo].[AttendanceDetail]   +610.0 MB   rows   +931,501
 ```
 
-The history lives on the machine running ERP Doctor. No table, trigger, stored procedure, or SQL Agent job is created in the customer database.
+The history lives on the machine running ERP Doctor. No history table, trigger, stored procedure, or SQL Agent job is created in SQL Server.
 
 See [`docs/database-growth.md`](docs/database-growth.md).
 
+## PostgreSQL reference plugin (v0.9)
+
+`ErpDoctor.Plugin.Postgres` is the first production-style reference provider built on the Plugin SDK. It uses Npgsql and contributes four read-only checks:
+
+```text
+plugin.postgres.connectivity
+plugin.postgres.database-size
+plugin.postgres.long-running
+plugin.postgres.blocking
+```
+
+Build the plugin:
+
+```bash
+dotnet build ErpDoctor.sln --configuration Release
+```
+
+Set the PostgreSQL connection string in an environment variable:
+
+```powershell
+$env:ERP_DOCTOR_POSTGRES="Host=localhost;Port=5432;Database=erp;Username=erp_doctor;Password=..."
+```
+
+Copy or adapt the example:
+
+```json
+{
+  "plugins": {
+    "assemblies": [
+      "plugins/ErpDoctor.Plugin.Postgres/bin/Release/net8.0/ErpDoctor.Plugin.Postgres.dll"
+    ],
+    "settings": {
+      "postgres": {
+        "connectionStringEnvironmentVariable": "ERP_DOCTOR_POSTGRES",
+        "connectionTimeoutSeconds": 5,
+        "commandTimeoutSeconds": 10,
+        "databaseSizeWarningGb": 20,
+        "longRunningWarningSeconds": 30,
+        "blockingWarningSeconds": 10
+      }
+    }
+  }
+}
+```
+
+Discover the DLL without executing database checks:
+
+```bash
+erp-doctor plugins --config samples/postgres-plugin.example.json
+```
+
+Run only PostgreSQL/plugin diagnostics:
+
+```bash
+erp-doctor plugin --config samples/postgres-plugin.example.json
+```
+
+The provider intentionally does **not** export SQL text from `pg_stat_activity`; long-running and blocking evidence is bounded to metadata such as backend PIDs, age, and wait event. It never calls `pg_terminate_backend` or `pg_cancel_backend`.
+
+See [`docs/postgres-plugin.md`](docs/postgres-plugin.md) and [`samples/postgres-plugin.example.json`](samples/postgres-plugin.example.json).
+
 ## Configuration drift
 
-Compare DEV/UAT/PROD/customer appsettings:
+Compare DEV/UAT/PROD/customer appsettings without pasting credentials into a spreadsheet or chat:
 
 ```bash
 erp-doctor config-diff \
@@ -238,6 +251,14 @@ erp-doctor config-diff \
 Sensitive paths such as connection strings, passwords, tokens, secrets, API/access/private keys, and authorization values are compared in memory but displayed only as redacted state such as `[SET]`.
 
 See [`docs/config-drift.md`](docs/config-drift.md).
+
+## IIS and Windows Event Log
+
+The `iis` category can inspect AppPool state, IIS site state, expected bindings, and the root physical path without modifying IIS.
+
+The `eventlog` category reads recent Windows Event Log entries through native Windows APIs. It can filter by provider, lookback period, max event count, and severity. Event messages are truncated and scrubbed for common password/token/API-key/Bearer fragments before entering reports.
+
+See [`docs/iis-sites.md`](docs/iis-sites.md) and [`docs/windows-event-log.md`](docs/windows-event-log.md).
 
 ## Reports and support bundles
 
@@ -265,11 +286,9 @@ ERP Doctor sanitizes secret-like report evidence before writing the bundle. Oper
 
 See [`docs/report-schema.md`](docs/report-schema.md) and [`docs/support-bundle.md`](docs/support-bundle.md).
 
-## Plugin SDK (v0.8)
+## Plugin SDK
 
-ERP Doctor can now accept checks without changing Core or the CLI.
-
-The public contract lives in **`ErpDoctor.PluginSdk`**, which intentionally does **not** reference `ErpDoctor.Core`.
+The public plugin contract lives in `ErpDoctor.PluginSdk`, which intentionally does **not** reference `ErpDoctor.Core`.
 
 ```csharp
 using ErpDoctor.PluginSdk;
@@ -290,19 +309,15 @@ Configure an explicit local DLL:
 ```json
 {
   "plugins": {
-    "assemblies": [
-      "plugins/ErpDoctor.Plugin.Postgres.dll"
-    ],
+    "assemblies": ["plugins/MyCompany.Diagnostics.dll"],
     "settings": {
-      "postgres": {
-        "connectionStringEnvironmentVariable": "POSTGRES_DB"
-      }
+      "my-company": {}
     }
   }
 }
 ```
 
-Validate discovery without executing plugin checks:
+Validate discovery without running contributed checks:
 
 ```bash
 erp-doctor plugins --config erp-doctor.json
@@ -314,21 +329,27 @@ Run only plugin checks:
 erp-doctor plugin --config erp-doctor.json
 ```
 
-Plugin check IDs are automatically namespaced as:
+Plugin IDs are automatically namespaced:
 
 ```text
 plugin.<plugin-id>.<check-id>
 ```
 
-A compile-tested sample is included at [`samples/ErpDoctor.SamplePlugin`](samples/ErpDoctor.SamplePlugin).
+A compile-tested minimal example lives at [`samples/ErpDoctor.SamplePlugin`](samples/ErpDoctor.SamplePlugin).
 
-See [`docs/plugin-sdk.md`](docs/plugin-sdk.md) for the API, dependency loading, configuration, failure behavior, and trust model.
+See [`docs/plugin-sdk.md`](docs/plugin-sdk.md).
 
 ## Plugin trust boundary
 
-**Plugins are executable code.** They run inside the ERP Doctor process with the same OS permissions as ERP Doctor.
+**Plugins are executable code.** They run inside the ERP Doctor process with the same operating-system permissions as ERP Doctor.
 
-The host therefore loads only explicit local DLL paths, refuses URLs, checks API compatibility, converts load failures into diagnostics, and suppresses raw exception messages from plugin checks.
+The host therefore:
+
+- loads only explicit local `.dll` paths,
+- refuses plugin URLs,
+- validates plugin/check IDs and API compatibility,
+- converts discovery/load failures into normal diagnostics,
+- suppresses raw exception messages from plugin checks.
 
 ERP Doctor's built-in diagnostics are designed to be read-only. That guarantee cannot automatically be extended to arbitrary third-party plugin code. Only install plugins you trust.
 
@@ -342,6 +363,8 @@ ERP Doctor's built-in diagnostics are designed to be read-only. That guarantee c
        Built-in checks                    PluginHost
              |                                 |
  System / SQL / HTTP / IIS / EventLog      PluginSdk DLLs
+             |                            /        |       \
+             |                      Sample    PostgreSQL   Future
              |                                 |
              +----------------+----------------+
                               |
@@ -362,43 +385,44 @@ ERP Doctor's built-in diagnostics are designed to be read-only. That guarantee c
                                             Support Bundle
 ```
 
-The diagnostic Core does not depend on SQL Server, IIS, HTTP, Event Log, or plugin implementations.
+The diagnostic Core does not depend on SQL Server, IIS, HTTP, Event Log, PostgreSQL, or other plugin implementations.
 
 ## Safety model
 
 Built-in production diagnostics follow these rules:
 
-1. No automatic database repair, shrink, or data mutation.
-2. No automatic SQL session kill.
+1. No automatic database repair, shrink, or ERP data mutation.
+2. No automatic SQL Server session kill.
 3. No automatic IIS AppPool/site restart or binding modification.
-4. Event Log is queried/rendered only; channels are never cleared or changed.
-5. Growth history writes local ERP Doctor state only.
+4. Windows Event Log is queried/rendered only; channels are never cleared or changed.
+5. SQL Server growth history writes local ERP Doctor state only.
 6. Config drift never prints or hashes sensitive values.
 7. Support bundles sanitize secret-like evidence before serialization.
 8. Checks that lack permission report `Error` instead of attempting privilege escalation.
 9. Diagnoses are evidence-backed guidance, not claims of absolute certainty.
-10. Third-party plugins are a separate trust boundary and must be reviewed by the user.
+10. The PostgreSQL reference plugin only performs inspection queries and never terminates backends.
+11. Third-party plugins are a separate trust boundary and must be reviewed by the user.
 
 ## Roadmap
 
 Completed:
 
-- [x] v0.1 diagnostic core + System/SQL/HTTP/IIS + diagnosis engine
+- [x] v0.1 diagnostic core + System/SQL Server/HTTP/IIS + diagnosis engine
 - [x] v0.2 stable report schema + health score + standalone HTML
 - [x] v0.3 sanitized support bundle
-- [x] v0.4 SQL database/table growth history
+- [x] v0.4 SQL Server database/table growth history
 - [x] v0.5 secret-safe configuration drift
 - [x] v0.6 IIS site/binding/physical-path diagnostics
 - [x] v0.7 Windows Event Log collector
 - [x] v0.8 Plugin SDK + PluginHost + sample plugin
+- [x] v0.9 PostgreSQL reference provider plugin
 
 Next:
 
-- [ ] PostgreSQL reference provider plugin
-- [ ] Docker diagnostics
+- [ ] Release automation and simple binary/global-tool installation
+- [ ] Docker diagnostics plugin
 - [ ] Linux/Nginx provider
 - [ ] Redis/RabbitMQ providers
-- [ ] Release automation and simple binary/global-tool installation
 - [ ] Broader cross-platform support
 
 ## Contributing
