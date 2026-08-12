@@ -4,7 +4,24 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 
-var configPath = GetConfigPath(args) ?? "erp-doctor.json";
+if (args.Any(arg => arg is "-h" or "--help" or "help"))
+{
+    Console.Error.WriteLine("Usage: erp-doctor-mcp [--config erp-doctor.json]");
+    return 0;
+}
+
+string configPath;
+try
+{
+    configPath = ParseConfigPath(args);
+}
+catch (ArgumentException ex)
+{
+    Console.Error.WriteLine(ex.Message);
+    Console.Error.WriteLine("Usage: erp-doctor-mcp [--config erp-doctor.json]");
+    return 2;
+}
+
 if (configPath.Contains("://", StringComparison.Ordinal))
 {
     Console.Error.WriteLine("MCP configuration must be a local filesystem path; URLs are not supported.");
@@ -12,10 +29,11 @@ if (configPath.Contains("://", StringComparison.Ordinal))
 }
 
 var fullConfigPath = Path.GetFullPath(configPath);
-var builder = Host.CreateApplicationBuilder(args);
+var builder = Host.CreateApplicationBuilder(Array.Empty<string>());
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole(options =>
 {
+    // stdio stdout is reserved for MCP protocol frames.
     options.LogToStandardErrorThreshold = LogLevel.Trace;
 });
 builder.Services.AddSingleton(new McpDiagnosticService(fullConfigPath));
@@ -27,27 +45,20 @@ builder.Services
 await builder.Build().RunAsync();
 return 0;
 
-static string? GetConfigPath(string[] args)
+static string ParseConfigPath(string[] args)
 {
-    for (var i = 0; i < args.Length; i++)
+    if (args.Length == 0)
     {
-        if (args[i] is "-h" or "--help" or "help")
-        {
-            Console.Error.WriteLine("Usage: erp-doctor-mcp [--config erp-doctor.json]");
-            Environment.ExitCode = 0;
-            return null;
-        }
-
-        if (args[i].Equals("--config", StringComparison.OrdinalIgnoreCase))
-        {
-            if (i + 1 >= args.Length || string.IsNullOrWhiteSpace(args[i + 1]))
-            {
-                throw new ArgumentException("--config requires a local file path.");
-            }
-
-            return args[i + 1];
-        }
+        return "erp-doctor.json";
     }
 
-    return null;
+    if (args.Length == 2 &&
+        args[0].Equals("--config", StringComparison.OrdinalIgnoreCase) &&
+        !string.IsNullOrWhiteSpace(args[1]))
+    {
+        return args[1];
+    }
+
+    throw new ArgumentException(
+        "Only the optional '--config <local-path>' startup argument is supported.");
 }
