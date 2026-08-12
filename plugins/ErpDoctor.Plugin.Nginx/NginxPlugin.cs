@@ -5,68 +5,17 @@ namespace ErpDoctor.Plugin.Nginx;
 public sealed class NginxPlugin : IErpDoctorPlugin
 {
     public string Id => "nginx";
-    public string Name => "Linux / Nginx Diagnostics";
-    public string Version => "0.1.0";
+    public string Name => "Nginx Diagnostics";
+    public string Version => "0.2.0";
 
     public IReadOnlyList<IPluginCheck> CreateChecks(PluginContext context)
     {
         var settings = NginxSettings.From(context.Configuration);
         return
         [
-            new LinuxRuntimeCheck(settings),
             new NginxVersionCheck(settings),
             new NginxConfigCheck(settings)
         ];
-    }
-}
-
-internal sealed class LinuxRuntimeCheck(NginxSettings settings) : IPluginCheck
-{
-    public string Id => "linux-runtime";
-    public string Name => "Linux runtime";
-    public string Category => "linux";
-
-    public async Task<PluginDiagnosticResult> ExecuteAsync(
-        PluginContext context,
-        CancellationToken cancellationToken)
-    {
-        _ = context;
-
-        if (!OperatingSystem.IsLinux())
-        {
-            return new PluginDiagnosticResult(
-                PluginDiagnosticStatus.Skipped,
-                "Linux runtime diagnostics require Linux.");
-        }
-
-        try
-        {
-            var osReleaseTask = File.ReadAllTextAsync("/etc/os-release", cancellationToken);
-            var uptimeTask = File.ReadAllTextAsync("/proc/uptime", cancellationToken);
-            var loadavgTask = File.ReadAllTextAsync("/proc/loadavg", cancellationToken);
-            var meminfoTask = File.ReadAllTextAsync("/proc/meminfo", cancellationToken);
-
-            await Task.WhenAll(osReleaseTask, uptimeTask, loadavgTask, meminfoTask);
-
-            var snapshot = LinuxSnapshotParser.Parse(
-                await osReleaseTask,
-                await uptimeTask,
-                await loadavgTask,
-                await meminfoTask,
-                Environment.ProcessorCount);
-
-            return LinuxSnapshotEvaluator.Evaluate(snapshot, settings);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return new PluginDiagnosticResult(
-                PluginDiagnosticStatus.Error,
-                $"Linux runtime files could not be read ({ex.GetType().Name}).",
-                Suggestions:
-                [
-                    "Confirm /etc/os-release and /proc runtime files are readable by the ERP Doctor process."
-                ]);
-        }
     }
 }
 
