@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using ErpDoctor.Core;
 using ErpDoctor.Infrastructure.HttpDiagnostics;
 using ErpDoctor.Infrastructure.IisDiagnostics;
@@ -31,6 +30,22 @@ internal static class ProgramEntry
         var leftConfigPath = GetOption(args, "--left");
         var rightConfigPath = GetOption(args, "--right");
         var ignorePrefixes = ParseIgnorePrefixes(GetOption(args, "--ignore"));
+        var jsonToStdout = string.Equals(jsonOutput, "-", StringComparison.Ordinal);
+
+        if (jsonToStdout && !SupportsJsonStdout(command))
+        {
+            Console.Error.WriteLine(
+                $"Command '{command}' does not produce the diagnostic-report schema required by --json -. " +
+                "Use check, report, system, sql, http, network, iis, eventlog, or plugin.");
+            return 2;
+        }
+
+        if (jsonToStdout &&
+            (!string.IsNullOrWhiteSpace(htmlOutput) || !string.IsNullOrWhiteSpace(bundleOutput)))
+        {
+            Console.Error.WriteLine("--json - cannot be combined with --html or --bundle; stdout must contain one JSON document only.");
+            return 2;
+        }
 
         using var cts = new CancellationTokenSource();
         Console.CancelKeyPress += (_, eventArgs) =>
@@ -145,9 +160,16 @@ internal static class ProgramEntry
             : Array.Empty<Diagnosis>();
         var report = DiagnosticReportFactory.Create(results, diagnoses);
 
-        ConsoleReport.Write(report);
+        if (jsonToStdout)
+        {
+            Console.Out.WriteLine(DiagnosticJsonReportSerializer.Serialize(report));
+        }
+        else
+        {
+            ConsoleReport.Write(report);
+        }
 
-        if (!string.IsNullOrWhiteSpace(jsonOutput))
+        if (!string.IsNullOrWhiteSpace(jsonOutput) && !jsonToStdout)
         {
             var jsonPath = await WriteJsonReportAsync(report, jsonOutput, cts.Token);
             Console.WriteLine();
@@ -301,14 +323,7 @@ internal static class ProgramEntry
         string path,
         CancellationToken cancellationToken)
     {
-        var options = new JsonSerializerOptions
-        {
-            WriteIndented = true,
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-        };
-        options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
-
-        var json = JsonSerializer.Serialize(report, options);
+        var json = DiagnosticJsonReportSerializer.Serialize(report, writeIndented: true);
         return await WriteTextFileAsync(path, json, cancellationToken);
     }
 
@@ -340,6 +355,17 @@ internal static class ProgramEntry
         command.Equals("bundle", StringComparison.OrdinalIgnoreCase) ||
         command.Equals("plugin", StringComparison.OrdinalIgnoreCase) ||
         command.Equals("plugins", StringComparison.OrdinalIgnoreCase);
+
+    private static bool SupportsJsonStdout(string command) =>
+        command.Equals("check", StringComparison.OrdinalIgnoreCase) ||
+        command.Equals("report", StringComparison.OrdinalIgnoreCase) ||
+        command.Equals("system", StringComparison.OrdinalIgnoreCase) ||
+        command.Equals("sql", StringComparison.OrdinalIgnoreCase) ||
+        command.Equals("http", StringComparison.OrdinalIgnoreCase) ||
+        command.Equals("network", StringComparison.OrdinalIgnoreCase) ||
+        command.Equals("iis", StringComparison.OrdinalIgnoreCase) ||
+        command.Equals("eventlog", StringComparison.OrdinalIgnoreCase) ||
+        command.Equals("plugin", StringComparison.OrdinalIgnoreCase);
 
     private static string GetCommand(string[] args)
     {
@@ -401,19 +427,19 @@ internal static class ProgramEntry
             ERP Doctor - read-only diagnostics for boring enterprise applications.
 
             Usage:
-              erp-doctor check [--config erp-doctor.json] [--json report.json] [--html report.html] [--bundle support.zip]
-              erp-doctor report [--config erp-doctor.json] [--json report.json] [--html report.html]
+              erp-doctor check [--config erp-doctor.json] [--json report.json| -] [--html report.html] [--bundle support.zip]
+              erp-doctor report [--config erp-doctor.json] [--json report.json| -] [--html report.html]
               erp-doctor bundle [--config erp-doctor.json] [--bundle support.zip]
               erp-doctor growth [--config erp-doctor.json] [--history erp-doctor-growth.json]
               erp-doctor config-diff --left appsettings.dev.json --right appsettings.prod.json [--ignore Logging,Serilog]
-              erp-doctor system [--config erp-doctor.json]
-              erp-doctor sql [--config erp-doctor.json]
-              erp-doctor http [--config erp-doctor.json]
-              erp-doctor network [--config erp-doctor.json]
-              erp-doctor iis [--config erp-doctor.json]
-              erp-doctor eventlog [--config erp-doctor.json]
+              erp-doctor system [--config erp-doctor.json] [--json -]
+              erp-doctor sql [--config erp-doctor.json] [--json -]
+              erp-doctor http [--config erp-doctor.json] [--json -]
+              erp-doctor network [--config erp-doctor.json] [--json -]
+              erp-doctor iis [--config erp-doctor.json] [--json -]
+              erp-doctor eventlog [--config erp-doctor.json] [--json -]
               erp-doctor plugins [--config erp-doctor.json]
-              erp-doctor plugin [--config erp-doctor.json]
+              erp-doctor plugin [--config erp-doctor.json] [--json -]
 
             Commands:
               check        Run every configured diagnostic and correlate likely causes.
@@ -431,10 +457,17 @@ internal static class ProgramEntry
               plugin       Run only checks contributed by configured plugins.
 
             Output/state options:
-              --json <path>     Write the stable machine-readable report schema as JSON.
+              --json <path>     Write the stable machine-readable report schema as indented JSON.
+              --json -          Write one compact diagnostic-report JSON document to stdout and suppress the human report.
+                                This mode is intended for CI, scripts, agents, and future MCP/integration wrappers.
               --html <path>     Write a standalone, dependency-free HTML diagnostic report.
               --bundle <path>   Write a sanitized ZIP with report.json, report.html, and manifest.json.
               --history <path>  Local JSON history used by the growth command.
+
+            JSON stdout rules:
+              --json - supports check, report, system, sql, http, network, iis, eventlog, and plugin.
+              It cannot be combined with --html or --bundle so stdout remains exactly one JSON document.
+              Diagnostic/configuration errors are written to stderr; exit codes keep their normal meaning.
 
             Config drift options:
               --left <path>     Left JSON/appsettings file.

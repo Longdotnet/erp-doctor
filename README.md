@@ -41,7 +41,7 @@ ERP Doctor keeps those signals in one run so developers/support can reason about
 | HTTP | Expected status, timeout, latency threshold |
 | Windows Event Log | Recent Critical/Error entries, optional Warning/provider filters |
 | Configuration | Secret-safe JSON/appsettings drift between environments |
-| Reporting | Console, stable JSON, standalone HTML |
+| Reporting | Console, stable file/stdout JSON, standalone HTML |
 | Support handoff | Sanitized ZIP bundle with JSON + HTML + manifest |
 | Plugin SDK | Explicit local DLL discovery and contributed diagnostic checks |
 
@@ -141,13 +141,45 @@ erp-doctor plugins      Discover configured plugins without running checks
 erp-doctor plugin       Run contributed plugin checks only
 ```
 
+## Machine-readable JSON stdout (v0.18)
+
+Use `-` as the JSON destination when another program should consume ERP Doctor directly:
+
+```bash
+erp-doctor check --config erp-doctor.json --json -
+```
+
+This writes **one compact schema `1.0` JSON document to stdout** and suppresses the human console report. The same mode works with `report`, `system`, `sql`, `http`, `network`, `iis`, `eventlog`, and `plugin`.
+
+Linux example:
+
+```bash
+erp-doctor system --json - | jq '.overallStatus, .healthScore'
+```
+
+PowerShell:
+
+```powershell
+$report = erp-doctor system --json - | ConvertFrom-Json
+$report.schemaVersion
+$report.results
+```
+
+The stdout/stderr boundary is intentional: report JSON stays on stdout, while usage/configuration failures go to stderr. Exit code `1` can still accompany a valid JSON document when diagnostics find a Critical/Error result.
+
+To keep stdout deterministic, `--json -` rejects combinations with `--html` or `--bundle` before running diagnostics or creating those artifacts.
+
+This is an integration transport, **not an MCP server**. It gives CI/scripts/agents and a future MCP wrapper a stable contract without opening a listener or tying Core to a particular agent protocol/SDK.
+
+See [`docs/json-stdout.md`](docs/json-stdout.md) and [`docs/report-schema.md`](docs/report-schema.md).
+
 ## System Doctor (v0.17)
 
 ```bash
 erp-doctor system --config erp-doctor.json
 ```
 
-Built-in host pressure now includes:
+Built-in host pressure includes:
 
 ```text
 system.cpu        Aggregate CPU utilization (Windows + Linux)
@@ -242,9 +274,9 @@ erp-doctor report --config erp-doctor.json
 erp-doctor bundle --config erp-doctor.json
 ```
 
-Secret-like report evidence is sanitized before serialization. Operational identifiers can remain, so bundles should still be reviewed before sharing outside the organization.
+The versioned `DiagnosticReport` is also available directly on stdout with `--json -`. Operational identifiers may remain in reports, so output/bundles should still be reviewed before sharing outside the organization.
 
-See [`docs/report-schema.md`](docs/report-schema.md) and [`docs/support-bundle.md`](docs/support-bundle.md).
+See [`docs/report-schema.md`](docs/report-schema.md), [`docs/json-stdout.md`](docs/json-stdout.md), and [`docs/support-bundle.md`](docs/support-bundle.md).
 
 ## Provider plugins
 
@@ -272,7 +304,7 @@ See [`docs/docker-plugin.md`](docs/docker-plugin.md).
 
 ### Nginx
 
-Starting in v0.17, generic Linux host pressure belongs to built-in System Doctor. `ErpDoctor.Plugin.Nginx` now contributes only:
+Starting in v0.17, generic Linux host pressure belongs to built-in System Doctor. `ErpDoctor.Plugin.Nginx` contributes only:
 
 ```text
 plugin.nginx.version
@@ -339,12 +371,13 @@ Every release runs restore → build → test → package. Dry-runs additionally
 - standalone Linux `--help`,
 - standalone Linux Network Doctor DNS/TCP loopback behavior,
 - standalone Linux System Doctor CPU/load/process-pressure execution,
+- standalone Linux JSON stdout parsing/schema/no-human-output/conflict behavior,
 - standalone provider loading: PostgreSQL (4), Docker (3), Nginx (2), Redis (5), RabbitMQ (3),
 - provider archive creation,
 - SHA256 verification for platform/provider/NuGet/installer assets,
 - Linux installer installation/execution from the packaged release.
 
-Windows CI separately validates the PowerShell installer, requires a deliberately invalid checksum to be rejected, then verifies a valid archive can be installed/executed.
+Windows CI separately validates packaged-tool JSON stdout with `ConvertFrom-Json`, the PowerShell installer, invalid-checksum rejection, and valid archive installation/execution.
 
 Branch/manual dry-runs cannot create a GitHub Release or publish NuGet; publishing is guarded to real tag pushes only.
 
@@ -370,9 +403,9 @@ See [`docs/releasing.md`](docs/releasing.md).
                               |
                        DiagnosisEngine
                               |
-                       DiagnosticReport
+                       DiagnosticReport  (schema 1.0)
                               |
-             Console / JSON / HTML / Support Bundle
+       Console / JSON file / JSON stdout / HTML / Support Bundle
 ```
 
 ## Safety model
@@ -387,14 +420,15 @@ Current built-in/provider/installer behavior follows these principles:
 6. Config drift never prints/hashes sensitive values.
 7. Network Doctor only probes explicitly configured DNS names/TCP ports; it performs no discovery/scanning or network mutation.
 8. System pressure checks never terminate/suspend processes and never collect process command lines, environment variables, or memory contents.
-9. PostgreSQL provider never terminates/cancels backends.
-10. Redis provider never reads keys/values or changes Redis state/topology.
-11. RabbitMQ provider is GET-only and never publishes/purges/deletes/requeues messages or mutates broker topology/accounts.
-12. Docker provider never changes container/engine state.
-13. Nginx provider never reloads/stops Nginx or dumps the full config.
-14. Permission/CLI/API failures become diagnostics instead of privilege escalation.
-15. Self-contained installers verify SHA256 before extraction; Windows does not clear custom destination directories and Linux does not modify shell startup files.
-16. Third-party plugins remain a separate executable-code trust boundary.
+9. JSON stdout is serialization only: it opens no listener/server and grants no repair capability.
+10. PostgreSQL provider never terminates/cancels backends.
+11. Redis provider never reads keys/values or changes Redis state/topology.
+12. RabbitMQ provider is GET-only and never publishes/purges/deletes/requeues messages or mutates broker topology/accounts.
+13. Docker provider never changes container/engine state.
+14. Nginx provider never reloads/stops Nginx or dumps the full config.
+15. Permission/CLI/API failures become diagnostics instead of privilege escalation.
+16. Self-contained installers verify SHA256 before extraction; Windows does not clear custom destination directories and Linux does not modify shell startup files.
+17. Third-party plugins remain a separate executable-code trust boundary.
 
 ## Roadmap
 
@@ -417,11 +451,12 @@ Completed:
 - [x] v0.15 checksum-verified Windows/Linux installer UX
 - [x] v0.16 cross-platform DNS/TCP Network Doctor
 - [x] v0.17 cross-platform CPU/load/process-pressure System Doctor
+- [x] v0.18 machine-readable DiagnosticReport JSON stdout transport
 
 Next:
 
 - [ ] First public release/tag after explicit maintainer approval
-- [ ] Optional machine-readable integration/MCP surface after provider feedback
+- [ ] Optional MCP wrapper over the versioned read-only DiagnosticReport contract
 - [ ] Additional providers driven by real incidents/contributor demand
 
 ## Contributing

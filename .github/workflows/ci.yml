@@ -57,6 +57,47 @@ jobs:
             --add-source "$PWD/artifacts/nuget"
           & .\artifacts\tool-smoke\erp-doctor.exe --help
 
+      - name: Smoke test JSON-only stdout mode
+        shell: pwsh
+        run: |
+          $tool = Join-Path $PWD "artifacts/tool-smoke/erp-doctor.exe"
+
+          $json = & $tool system --json -
+          $diagnosticExit = $LASTEXITCODE
+          if ($diagnosticExit -gt 1) {
+            throw "JSON stdout diagnostic exited unexpectedly with code $diagnosticExit."
+          }
+
+          if ($json.Count -ne 1) {
+            throw "Expected exactly one compact JSON stdout line, received $($json.Count)."
+          }
+
+          $report = $json | ConvertFrom-Json -ErrorAction Stop
+          if ($report.schemaVersion -ne "1.0") {
+            throw "Unexpected diagnostic schemaVersion '$($report.schemaVersion)'."
+          }
+          if ($null -eq $report.results -or $report.results.Count -eq 0) {
+            throw "JSON stdout report contained no diagnostic results."
+          }
+          if ($json -match "Health score:" -or $json -match "Summary:") {
+            throw "Human console output leaked into JSON stdout mode."
+          }
+
+          $conflictOutput = & $tool system --json - --html artifacts/should-not-exist.html 2>$null
+          if ($LASTEXITCODE -ne 2) {
+            throw "Expected --json - / --html conflict to return usage exit code 2."
+          }
+          if ($conflictOutput) {
+            throw "Conflicting JSON stdout invocation wrote to stdout."
+          }
+          if (Test-Path "artifacts/should-not-exist.html") {
+            throw "Conflicting JSON stdout invocation created an HTML artifact."
+          }
+
+          # The last native command intentionally returned 2 for the conflict assertion.
+          # Reset it so GitHub's PowerShell wrapper does not treat that expected value as the step result.
+          $global:LASTEXITCODE = 0
+
       - name: Validate installer script syntax and help
         shell: powershell
         run: |
