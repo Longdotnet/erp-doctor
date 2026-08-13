@@ -1,11 +1,7 @@
 using System.Text.Json;
 using ErpDoctor.Core;
-using ErpDoctor.Infrastructure.HttpDiagnostics;
-using ErpDoctor.Infrastructure.IisDiagnostics;
-using ErpDoctor.Infrastructure.NetworkDiagnostics;
+using ErpDoctor.Infrastructure;
 using ErpDoctor.Infrastructure.SqlServerDiagnostics;
-using ErpDoctor.Infrastructure.SystemDiagnostics;
-using ErpDoctor.Infrastructure.WindowsEventDiagnostics;
 using ErpDoctor.PluginHost;
 using ErpDoctor.Reporting;
 
@@ -267,56 +263,10 @@ internal static class ProgramEntry
 
     private static IReadOnlyList<IDiagnosticCheck> BuildChecks(
         ErpDoctorOptions options,
-        PluginDiscovery pluginDiscovery)
-    {
-        var checks = new List<IDiagnosticCheck>
-        {
-            new DotNetRuntimeCheck(),
-            new MemoryCheck(),
-            new CpuUtilizationCheck(),
-            new LoadAverageCheck(),
-            new TopProcessesCheck(),
-            new SqlConnectivityCheck(),
-            new SqlDatabaseSizeCheck(),
-            new SqlLargestTablesCheck(),
-            new SqlBlockingCheck(),
-            new SqlLongRunningRequestsCheck()
-        };
-
-        foreach (var drive in DriveInfo.GetDrives().Where(x => x.DriveType == DriveType.Fixed))
-        {
-            checks.Add(new DiskSpaceCheck(drive));
-        }
-
-        foreach (var endpoint in options.Http.Endpoints)
-        {
-            checks.Add(new HttpEndpointCheck(endpoint));
-        }
-
-        foreach (var target in options.Network.Targets)
-        {
-            checks.Add(new DnsResolutionCheck(target));
-            checks.Add(new TcpConnectivityCheck(target));
-        }
-
-        foreach (var appPool in options.Iis.AppPools)
-        {
-            checks.Add(new IisAppPoolCheck(appPool));
-        }
-
-        foreach (var site in options.Iis.Sites)
-        {
-            checks.Add(new IisSiteCheck(site));
-        }
-
-        foreach (var eventQuery in options.WindowsEventLog.Queries)
-        {
-            checks.Add(new WindowsEventLogCheck(eventQuery));
-        }
-
-        checks.AddRange(pluginDiscovery.DiagnosticChecks);
-        return checks;
-    }
+        PluginDiscovery pluginDiscovery) =>
+        BuiltInDiagnosticCheckCatalog.Create(options)
+            .Concat(pluginDiscovery.DiagnosticChecks)
+            .ToArray();
 
     private static async Task<string> WriteJsonReportAsync(
         DiagnosticReport report,

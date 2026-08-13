@@ -11,7 +11,7 @@ on:
       version:
         description: "SemVer used for a packaging dry run (no release is created)"
         required: true
-        default: "0.18.0-dev.1"
+        default: "0.19.0-dev.1"
 
 permissions:
   contents: write
@@ -41,7 +41,7 @@ jobs:
           elif [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
             VERSION="$INPUT_VERSION"
           else
-            VERSION="0.18.0-dev.${GITHUB_RUN_NUMBER}"
+            VERSION="0.19.0-dev.${GITHUB_RUN_NUMBER}"
           fi
 
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
@@ -103,6 +103,36 @@ jobs:
             --runtime linux-x64 \
             --self-contained true \
             --output artifacts/linux-x64 \
+            -p:Version="$VERSION" \
+            -p:PublishSingleFile=true \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:DebugType=None \
+            -p:DebugSymbols=false
+
+      - name: Publish MCP server Windows x64
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet publish src/ErpDoctor.Mcp/ErpDoctor.Mcp.csproj \
+            --configuration Release \
+            --runtime win-x64 \
+            --self-contained true \
+            --output artifacts/mcp-win-x64 \
+            -p:Version="$VERSION" \
+            -p:PublishSingleFile=true \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:DebugType=None \
+            -p:DebugSymbols=false
+
+      - name: Publish MCP server Linux x64
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet publish src/ErpDoctor.Mcp/ErpDoctor.Mcp.csproj \
+            --configuration Release \
+            --runtime linux-x64 \
+            --self-contained true \
+            --output artifacts/mcp-linux-x64 \
             -p:Version="$VERSION" \
             -p:PublishSingleFile=true \
             -p:IncludeNativeLibrariesForSelfExtract=true \
@@ -334,6 +364,20 @@ jobs:
             exit 1
           fi
 
+      - name: Smoke test self-contained Linux MCP stdio server
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x artifacts/mcp-linux-x64/ErpDoctor.Mcp
+          artifacts/mcp-linux-x64/ErpDoctor.Mcp --help > /dev/null
+
+          ERP_DOCTOR_MCP_SMOKE_COMMAND="$GITHUB_WORKSPACE/artifacts/mcp-linux-x64/ErpDoctor.Mcp" \
+            dotnet test tests/ErpDoctor.Tests/ErpDoctor.Tests.csproj \
+              --configuration Release \
+              --no-build \
+              --filter "FullyQualifiedName~McpServerTests.StdioServer_ListsAndExecutesStructuredDiagnosticTool" \
+              -p:Version="$VERSION"
+
       - name: Build release archives and checksums
         shell: bash
         run: |
@@ -345,6 +389,13 @@ jobs:
           cp LICENSE artifacts/linux-x64/LICENSE
           cp samples/erp-doctor.example.json artifacts/linux-x64/erp-doctor.example.json
 
+          cp LICENSE artifacts/mcp-win-x64/LICENSE
+          cp docs/mcp-server.md artifacts/mcp-win-x64/README.md
+          cp samples/erp-doctor.example.json artifacts/mcp-win-x64/erp-doctor.example.json
+          cp LICENSE artifacts/mcp-linux-x64/LICENSE
+          cp docs/mcp-server.md artifacts/mcp-linux-x64/README.md
+          cp samples/erp-doctor.example.json artifacts/mcp-linux-x64/erp-doctor.example.json
+
           (
             cd artifacts/win-x64
             zip -q -r ../release/erp-doctor-win-x64.zip .
@@ -352,6 +403,14 @@ jobs:
 
           tar -czf artifacts/release/erp-doctor-linux-x64.tar.gz \
             -C artifacts/linux-x64 .
+
+          (
+            cd artifacts/mcp-win-x64
+            zip -q -r ../release/erp-doctor-mcp-win-x64.zip .
+          )
+
+          tar -czf artifacts/release/erp-doctor-mcp-linux-x64.tar.gz \
+            -C artifacts/mcp-linux-x64 .
 
           (
             cd artifacts/postgres-plugin
@@ -388,6 +447,8 @@ jobs:
             sha256sum \
               erp-doctor-win-x64.zip \
               erp-doctor-linux-x64.tar.gz \
+              erp-doctor-mcp-win-x64.zip \
+              erp-doctor-mcp-linux-x64.tar.gz \
               erp-doctor-plugin-postgres.zip \
               erp-doctor-plugin-docker.zip \
               erp-doctor-plugin-nginx.zip \

@@ -17,6 +17,7 @@
     <ProjectReference Include="..\..\src\ErpDoctor.Infrastructure\ErpDoctor.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\ErpDoctor.PluginHost\ErpDoctor.PluginHost.csproj" />
     <ProjectReference Include="..\..\src\ErpDoctor.Reporting\ErpDoctor.Reporting.csproj" />
+    <ProjectReference Include="..\..\src\ErpDoctor.Mcp\ErpDoctor.Mcp.csproj" />
     <ProjectReference Include="..\..\samples\ErpDoctor.SamplePlugin\ErpDoctor.SamplePlugin.csproj" />
     <ProjectReference Include="..\..\plugins\ErpDoctor.Plugin.Postgres\ErpDoctor.Plugin.Postgres.csproj" />
     <ProjectReference Include="..\..\plugins\ErpDoctor.Plugin.Docker\ErpDoctor.Plugin.Docker.csproj" />

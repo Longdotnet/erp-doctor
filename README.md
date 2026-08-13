@@ -42,6 +42,7 @@ ERP Doctor keeps those signals in one run so developers/support can reason about
 | Windows Event Log | Recent Critical/Error entries, optional Warning/provider filters |
 | Configuration | Secret-safe JSON/appsettings drift between environments |
 | Reporting | Console, stable file/stdout JSON, standalone HTML |
+| MCP | Optional read-only stdio server over the same versioned `DiagnosticReport` contract |
 | Support handoff | Sanitized ZIP bundle with JSON + HTML + manifest |
 | Plugin SDK | Explicit local DLL discovery and contributed diagnostic checks |
 
@@ -141,6 +142,50 @@ erp-doctor plugins      Discover configured plugins without running checks
 erp-doctor plugin       Run contributed plugin checks only
 ```
 
+## Read-only MCP stdio server (v0.19)
+
+ERP Doctor now has an optional MCP adapter that uses the **same built-in diagnostic catalog, runner, diagnosis engine, and `DiagnosticReport` schema** as the CLI.
+
+Start the server with a local operator-owned config:
+
+```bash
+erp-doctor-mcp --config /path/to/erp-doctor.json
+```
+
+The v0.19 server supports **stdio only**. It opens no HTTP/TCP listener and exposes one tool:
+
+```text
+run_diagnostics
+```
+
+Allowed scopes:
+
+```text
+check
+system
+sql
+http
+network
+iis
+eventlog
+plugin
+```
+
+The tool is annotated read-only/non-destructive/idempotent and returns structured `DiagnosticReport` schema `1.0` content. The MCP client can choose only the bounded scope; it **cannot choose a config path or plugin path per request**. `--config` is controlled by the operator when the server starts.
+
+The server exposes no repair/restart/session-kill/process-kill/shell/SQL/file mutation tool. Stdio stdout is reserved for MCP protocol frames; logs go to stderr.
+
+Windows/Linux MCP binaries are packaged as separate self-contained release assets rather than being silently installed with the normal CLI:
+
+```text
+erp-doctor-mcp-win-x64.zip
+erp-doctor-mcp-linux-x64.tar.gz
+```
+
+Release dry-runs use the official C# `McpClient` to handshake with the **published Linux MCP binary**, list `run_diagnostics`, call it, and verify structured schema `1.0` results.
+
+See [`docs/mcp-server.md`](docs/mcp-server.md).
+
 ## Machine-readable JSON stdout (v0.18)
 
 Use `-` as the JSON destination when another program should consume ERP Doctor directly:
@@ -168,8 +213,6 @@ $report.results
 The stdout/stderr boundary is intentional: report JSON stays on stdout, while usage/configuration failures go to stderr. Exit code `1` can still accompany a valid JSON document when diagnostics find a Critical/Error result.
 
 To keep stdout deterministic, `--json -` rejects combinations with `--html` or `--bundle` before running diagnostics or creating those artifacts.
-
-This is an integration transport, **not an MCP server**. It gives CI/scripts/agents and a future MCP wrapper a stable contract without opening a listener or tying Core to a particular agent protocol/SDK.
 
 See [`docs/json-stdout.md`](docs/json-stdout.md) and [`docs/report-schema.md`](docs/report-schema.md).
 
@@ -274,9 +317,9 @@ erp-doctor report --config erp-doctor.json
 erp-doctor bundle --config erp-doctor.json
 ```
 
-The versioned `DiagnosticReport` is also available directly on stdout with `--json -`. Operational identifiers may remain in reports, so output/bundles should still be reviewed before sharing outside the organization.
+The versioned `DiagnosticReport` is also available directly on stdout with `--json -` and as MCP structured content. Operational identifiers may remain in reports, so output/bundles should still be reviewed before sharing outside the organization.
 
-See [`docs/report-schema.md`](docs/report-schema.md), [`docs/json-stdout.md`](docs/json-stdout.md), and [`docs/support-bundle.md`](docs/support-bundle.md).
+See [`docs/report-schema.md`](docs/report-schema.md), [`docs/json-stdout.md`](docs/json-stdout.md), [`docs/mcp-server.md`](docs/mcp-server.md), and [`docs/support-bundle.md`](docs/support-bundle.md).
 
 ## Provider plugins
 
@@ -367,17 +410,19 @@ See [`docs/plugin-sdk.md`](docs/plugin-sdk.md).
 
 Every release runs restore → build → test → package. Dry-runs additionally prove:
 
-- self-contained Windows/Linux publish,
+- self-contained CLI Windows/Linux publish,
+- self-contained MCP server Windows/Linux publish,
 - standalone Linux `--help`,
 - standalone Linux Network Doctor DNS/TCP loopback behavior,
 - standalone Linux System Doctor CPU/load/process-pressure execution,
 - standalone Linux JSON stdout parsing/schema/no-human-output/conflict behavior,
+- official-client MCP handshake/tool discovery/call against the **published Linux MCP binary**,
 - standalone provider loading: PostgreSQL (4), Docker (3), Nginx (2), Redis (5), RabbitMQ (3),
-- provider archive creation,
-- SHA256 verification for platform/provider/NuGet/installer assets,
-- Linux installer installation/execution from the packaged release.
+- CLI/MCP/provider archive creation,
+- SHA256 verification for platform/MCP/provider/NuGet/installer assets,
+- Linux installer installation/execution from the packaged CLI release.
 
-Windows CI separately validates packaged-tool JSON stdout with `ConvertFrom-Json`, the PowerShell installer, invalid-checksum rejection, and valid archive installation/execution.
+Windows CI separately validates the development MCP stdio handshake, packaged-tool JSON stdout, the PowerShell installer, invalid-checksum rejection, and valid archive installation/execution.
 
 Branch/manual dry-runs cannot create a GitHub Release or publish NuGet; publishing is guarded to real tag pushes only.
 
@@ -386,31 +431,35 @@ See [`docs/releasing.md`](docs/releasing.md).
 ## Architecture
 
 ```text
-                         ErpDoctor.Cli
-                              |
-             +----------------+----------------+
-             |                                 |
-       Built-in checks                    PluginHost
-             |                                 |
- System / Network / SQL / HTTP / IIS / EventLog   PluginSdk DLLs
-             |                 /      /       |       |        \
-             |            PostgreSQL Docker  Nginx   Redis  RabbitMQ
-             +----------------+----------------+
-                              |
-                       DiagnosticRunner
-                              |
-                       DiagnosticResult
-                              |
-                       DiagnosisEngine
-                              |
-                       DiagnosticReport  (schema 1.0)
-                              |
-       Console / JSON file / JSON stdout / HTML / Support Bundle
+                   ErpDoctor.Cli          ErpDoctor.Mcp
+                        |                       |
+                        +-----------+-----------+
+                                    |
+                    BuiltInDiagnosticCheckCatalog
+                                    |
+                +-------------------+-------------------+
+                |                                       |
+          Built-in checks                           PluginHost
+                |                                       |
+ System / Network / SQL / HTTP / IIS / EventLog      PluginSdk DLLs
+                |                      /      /       |       |        \
+                |                 PostgreSQL Docker  Nginx   Redis  RabbitMQ
+                +-------------------+-------------------+
+                                    |
+                             DiagnosticRunner
+                                    |
+                             DiagnosticResult
+                                    |
+                             DiagnosisEngine
+                                    |
+                         DiagnosticReport (schema 1.0)
+                                    |
+       Console / JSON / HTML / Support Bundle / MCP structured content
 ```
 
 ## Safety model
 
-Current built-in/provider/installer behavior follows these principles:
+Current built-in/provider/installer/MCP behavior follows these principles:
 
 1. No automatic ERP/database repair or data mutation.
 2. No automatic SQL Server session kill.
@@ -421,14 +470,15 @@ Current built-in/provider/installer behavior follows these principles:
 7. Network Doctor only probes explicitly configured DNS names/TCP ports; it performs no discovery/scanning or network mutation.
 8. System pressure checks never terminate/suspend processes and never collect process command lines, environment variables, or memory contents.
 9. JSON stdout is serialization only: it opens no listener/server and grants no repair capability.
-10. PostgreSQL provider never terminates/cancels backends.
-11. Redis provider never reads keys/values or changes Redis state/topology.
-12. RabbitMQ provider is GET-only and never publishes/purges/deletes/requeues messages or mutates broker topology/accounts.
-13. Docker provider never changes container/engine state.
-14. Nginx provider never reloads/stops Nginx or dumps the full config.
-15. Permission/CLI/API failures become diagnostics instead of privilege escalation.
-16. Self-contained installers verify SHA256 before extraction; Windows does not clear custom destination directories and Linux does not modify shell startup files.
-17. Third-party plugins remain a separate executable-code trust boundary.
+10. MCP v0.19 is stdio-only, exposes one read-only diagnostic tool, and does not let a client choose config/plugin paths per request.
+11. PostgreSQL provider never terminates/cancels backends.
+12. Redis provider never reads keys/values or changes Redis state/topology.
+13. RabbitMQ provider is GET-only and never publishes/purges/deletes/requeues messages or mutates broker topology/accounts.
+14. Docker provider never changes container/engine state.
+15. Nginx provider never reloads/stops Nginx or dumps the full config.
+16. Permission/CLI/API failures become diagnostics instead of privilege escalation.
+17. Self-contained installers verify SHA256 before extraction; Windows does not clear custom destination directories and Linux does not modify shell startup files.
+18. Third-party plugins remain a separate executable-code trust boundary.
 
 ## Roadmap
 
@@ -452,12 +502,13 @@ Completed:
 - [x] v0.16 cross-platform DNS/TCP Network Doctor
 - [x] v0.17 cross-platform CPU/load/process-pressure System Doctor
 - [x] v0.18 machine-readable DiagnosticReport JSON stdout transport
+- [x] v0.19 read-only MCP stdio server over the shared DiagnosticReport engine
 
 Next:
 
 - [ ] First public release/tag after explicit maintainer approval
-- [ ] Optional MCP wrapper over the versioned read-only DiagnosticReport contract
-- [ ] Additional providers driven by real incidents/contributor demand
+- [ ] Additional providers/features driven by real incidents and contributor feedback
+- [ ] Consider remote MCP transport only after an explicit authentication/authorization threat model
 
 ## Contributing
 

@@ -9,6 +9,8 @@ A successful packaging run creates:
 ```text
 erp-doctor-win-x64.zip
 erp-doctor-linux-x64.tar.gz
+erp-doctor-mcp-win-x64.zip
+erp-doctor-mcp-linux-x64.tar.gz
 erp-doctor-plugin-postgres.zip
 erp-doctor-plugin-docker.zip
 erp-doctor-plugin-nginx.zip
@@ -21,9 +23,11 @@ ErpDoctor.PluginSdk.<version>.nupkg
 checksums.txt
 ```
 
-The Windows and Linux archives are self-contained .NET 8 builds. PostgreSQL, Docker, Nginx, Redis, and RabbitMQ are shipped as separate provider bundles because plugins remain an explicit trust/install boundary.
+The CLI and MCP Windows/Linux archives are self-contained .NET 8 builds. The MCP server is shipped separately so installing the normal CLI does not implicitly install or enable an MCP process.
 
-`install.ps1` and `install.sh` are release assets too. Both scripts verify the platform archive SHA256 before extraction, and both installer files are themselves included in `checksums.txt`.
+PostgreSQL, Docker, Nginx, Redis, and RabbitMQ are separate provider bundles because plugins remain an explicit trust/install boundary.
+
+`install.ps1` and `install.sh` install the normal CLI release archive, not the MCP server. Both verify the platform archive SHA256 before extraction, and both installer files are themselves included in `checksums.txt`.
 
 ## Dry run
 
@@ -32,42 +36,42 @@ The Release workflow supports `workflow_dispatch` for manual packaging validatio
 Use a development SemVer such as:
 
 ```text
-0.18.0-dev.1
+0.19.0-dev.1
 ```
 
 A dry run:
 
-- restores, builds, and tests the solution,
+- restores, builds, and tests the full solution including `ErpDoctor.Mcp`,
 - packs the global tool and Plugin SDK,
-- publishes self-contained `win-x64` and `linux-x64` builds,
+- publishes self-contained CLI `win-x64` and `linux-x64` builds,
+- publishes self-contained MCP server `win-x64` and `linux-x64` builds,
 - publishes PostgreSQL, Docker, Nginx, Redis, and RabbitMQ provider bundles,
-- runs the standalone Linux binary,
+- runs the standalone Linux CLI,
 - verifies standalone Linux Network Doctor DNS/TCP behavior against a loopback listener,
 - verifies standalone Linux System Doctor CPU/load/process-pressure checks execute without runtime errors,
 - verifies standalone Linux `--json -` output is one parseable schema `1.0` document with no human console leakage,
-- verifies the JSON stdout conflict guard rejects mixed HTML output without creating an artifact,
-- verifies that the standalone binary can discover all bundled provider DLLs with expected check counts,
-- packages `install.ps1` and `install.sh`,
-- creates ZIP/tar archives,
+- uses the official C# `McpClient` to start the **published self-contained Linux MCP binary**, complete the stdio handshake, list `run_diagnostics`, call it with `scope=system`, and verify structured schema `1.0` results,
+- verifies that the standalone CLI can discover all bundled provider DLLs with expected check counts,
+- packages CLI/MCP/provider archives plus `install.ps1` and `install.sh`,
 - generates and verifies SHA256 checksums for every distributed archive/package/installer,
-- runs the Linux installer against the packaged Linux archive and executes the installed binary,
+- runs the Linux CLI installer against the packaged Linux CLI archive and executes the installed binary,
 - uploads the files as a workflow artifact,
 - does **not** create a GitHub Release,
 - does **not** publish to NuGet.org.
 
-Normal Windows CI additionally installs the packed global tool, parses `erp-doctor system --json -` with PowerShell `ConvertFrom-Json`, validates schema version `1.0`, tests the stdout conflict guard, then runs the existing checksum-verified installer gates.
+Normal Windows CI additionally verifies the development MCP stdio server through the official C# `McpClient`, validates read-only tool annotations and bounded scope errors, installs the packed global CLI tool, parses JSON stdout, and runs checksum-verified installer gates.
 
 This is the required validation path before creating a release tag.
 
 ## Real release
 
-A tag matching `v*.*.*` triggers the same release pipeline and then creates a GitHub Release.
+A tag matching `v*.*.*` triggers the same pipeline and then creates a GitHub Release.
 
 Example:
 
 ```bash
-git tag v0.18.0
-git push origin v0.18.0
+git tag v0.19.0
+git push origin v0.19.0
 ```
 
 The release tag is the source of truth for published package versions. The workflow passes `-p:Version=<tag-version>` to build/pack/publish.
@@ -93,6 +97,21 @@ dotnet tool install --global ErpDoctor.Tool
 dotnet tool update --global ErpDoctor.Tool
 ```
 
+## MCP server archives
+
+The optional MCP server is released separately:
+
+```text
+erp-doctor-mcp-win-x64.zip
+erp-doctor-mcp-linux-x64.tar.gz
+```
+
+Each archive contains the self-contained MCP executable, MIT license, MCP server documentation, and example ERP Doctor configuration.
+
+The v0.19 server is stdio-only and exposes one read-only `run_diagnostics` tool. A client cannot supply config/plugin paths per request; the local operator owns `--config` at server startup.
+
+See [`mcp-server.md`](mcp-server.md).
+
 ## Provider bundles
 
 Provider plugins are released separately from the standalone ERP Doctor binary:
@@ -107,7 +126,7 @@ erp-doctor-plugin-rabbitmq.zip
 
 Each archive contains its provider DLL/runtime dependencies when applicable, provider documentation, example configuration, and MIT license.
 
-Release smoke testing verifies the self-contained ERP Doctor binary can load:
+Release smoke testing verifies the self-contained CLI can load:
 
 - PostgreSQL: 4 checks,
 - Docker: 3 checks,
@@ -115,7 +134,7 @@ Release smoke testing verifies the self-contained ERP Doctor binary can load:
 - Redis: 5 checks,
 - RabbitMQ: 3 checks.
 
-Starting in v0.17, generic Linux host load/resource diagnostics are built into System Doctor rather than being contributed by the Nginx provider. The provider smoke test validates discovery/loading only; it does not execute provider diagnostics against live services.
+The provider smoke validates discovery/loading only; it does not execute provider diagnostics against live services.
 
 ## Network Doctor validation
 
@@ -125,7 +144,7 @@ The Linux release dry-run starts a loopback-only temporary listener and executes
 erp-doctor network --config artifacts/network-smoke.json
 ```
 
-The configured target uses `127.0.0.1` and a fixed CI-only port. The command must complete successfully, proving that the self-contained Linux artifact can perform both built-in DNS and TCP diagnostics without shell/network-tool dependencies.
+The command must complete successfully, proving the self-contained Linux artifact can perform built-in DNS/TCP diagnostics without shell/network-tool dependencies.
 
 ## System pressure validation
 
@@ -135,7 +154,7 @@ The Linux release dry-run also executes:
 erp-doctor system --config artifacts/system-pressure-smoke.json
 ```
 
-The smoke requires the self-contained Linux binary to emit all three v0.17 checks:
+The smoke requires:
 
 ```text
 System CPU
@@ -143,34 +162,40 @@ System load average
 Top processes by memory
 ```
 
-The workflow rejects an `Error` result for any of those checks. A Warning/Critical resource status is allowed because GitHub-hosted runner load is not deterministic; this smoke validates runtime capability rather than asserting that the CI host is idle.
+and rejects an `Error` result for any of those checks. Warning/Critical is allowed because hosted-runner load is not deterministic.
 
 ## JSON stdout validation
 
-v0.18 adds a machine-readable transport gate against the self-contained Linux artifact:
+The self-contained Linux CLI must produce one compact parseable schema `1.0` document for:
 
 ```bash
 erp-doctor system --config artifacts/system-pressure-smoke.json --json -
 ```
 
-The release workflow requires:
-
-- process exit code `0` or `1`, where `1` is allowed because it represents valid Critical/Error diagnostic health rather than transport failure,
-- exactly one compact stdout line,
-- valid JSON parsing,
-- `schemaVersion == "1.0"`,
-- a non-empty `results` array,
-- no human console markers in stdout.
-
-It also verifies this invalid combination:
-
-```bash
-erp-doctor system --json - --html artifacts/json-stdout-conflict.html
-```
-
-must return usage exit code `2`, write nothing to stdout, and create no HTML artifact. This keeps machine-readable stdout deterministic for CI, agents, and future integration/MCP wrappers.
+The mixed-output guard must also reject `--json - --html` with usage exit code `2`, empty stdout, and no HTML artifact.
 
 See [`json-stdout.md`](json-stdout.md).
+
+## MCP validation
+
+The normal test suite starts the development `ErpDoctor.Mcp` server with the official C# `McpClient`, then verifies tool discovery and structured diagnostics.
+
+The release dry-run repeats the handshake against the **published Linux MCP executable** by setting the test's server command to:
+
+```text
+artifacts/mcp-linux-x64/ErpDoctor.Mcp
+```
+
+The test requires:
+
+- successful stdio initialization,
+- discovery of exactly the intended `run_diagnostics` tool,
+- `scope=system` tool invocation,
+- non-error tool result,
+- structured `schemaVersion == "1.0"`,
+- non-empty diagnostic results.
+
+This prevents a release from passing only because the development assembly works while the self-contained MCP binary is broken.
 
 ## Installer validation
 
@@ -183,13 +208,11 @@ Windows CI validates:
 - invalid SHA256 rejection,
 - valid SHA256 acceptance,
 - extraction/copy into an isolated install directory,
-- execution of the installed binary.
+- execution of the installed CLI binary.
 
-Release dry-run validates Linux with the actual self-contained release tarball and the generated release `checksums.txt`.
+Release dry-run validates Linux with the actual self-contained CLI release tarball and generated `checksums.txt`.
 
-Installer validation does not mutate the runner's global machine configuration. Windows uses `-NoPathUpdate` in CI; Linux uses an isolated install directory.
-
-See [`installing.md`](installing.md).
+The CLI installer deliberately does not install the optional MCP server.
 
 ## NuGet.org publishing
 
@@ -206,7 +229,7 @@ If the secret is absent, NuGet publishing is skipped without blocking GitHub Rel
 
 ## Checksums
 
-`checksums.txt` contains SHA256 entries for every distributed archive/package/installer and is verified inside the workflow before artifact upload.
+`checksums.txt` contains SHA256 entries for every distributed CLI/MCP/provider archive, package, and installer and is verified inside the workflow before artifact upload.
 
 ```bash
 sha256sum -c checksums.txt
@@ -215,23 +238,22 @@ sha256sum -c checksums.txt
 PowerShell example:
 
 ```powershell
-Get-FileHash .\erp-doctor-win-x64.zip -Algorithm SHA256
+Get-FileHash .\erp-doctor-mcp-win-x64.zip -Algorithm SHA256
 ```
 
 ## Safety checklist before tagging
 
 Before a real release:
 
-1. `main` CI is green, including Windows JSON stdout and installer validation.
-2. A Release dry run for the intended version is green, including Linux installer, Network Doctor, System Doctor pressure, and JSON stdout validation.
-3. Self-contained Windows/Linux publishes pass.
-4. PostgreSQL, Docker, Nginx, Redis, and RabbitMQ provider archives are present.
-5. The standalone Linux binary discovers all five providers with expected check counts (PostgreSQL 4, Docker 3, Nginx 2, Redis 5, RabbitMQ 3).
-6. The standalone Linux binary passes the DNS/TCP Network Doctor loopback smoke.
-7. The standalone Linux binary executes CPU/load/process-pressure checks without Error results.
-8. `--json -` produces one parseable schema `1.0` document and its mixed-output conflict guard passes.
-9. `install.ps1`, `install.sh`, and every other release asset have entries in `checksums.txt`.
-10. Every checksum verifies.
-11. README/config/install examples contain no customer-specific secrets/data.
-12. Every bundled provider is intentionally included.
-13. Only then create/push the release tag.
+1. `main` CI is green, including MCP stdio, JSON stdout, and Windows installer validation.
+2. A Release dry run for the intended version is green.
+3. Self-contained CLI Windows/Linux publishes pass.
+4. Self-contained MCP Windows/Linux publishes pass.
+5. The official MCP client successfully handshakes/calls the published Linux MCP binary and receives structured schema `1.0` diagnostics.
+6. PostgreSQL, Docker, Nginx, Redis, and RabbitMQ provider archives are present and provider discovery counts match expectations.
+7. Network Doctor, System Doctor, and JSON stdout Linux smokes pass.
+8. CLI/MCP/provider/NuGet/installer assets all have entries in `checksums.txt`.
+9. Every checksum verifies.
+10. README/config/MCP/install examples contain no customer-specific secrets/data.
+11. Every bundled provider is intentionally included.
+12. Only then create/push the release tag.
