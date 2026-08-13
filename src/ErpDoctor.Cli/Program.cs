@@ -31,8 +31,8 @@ internal static class ProgramEntry
         if (jsonToStdout && !SupportsJsonStdout(command))
         {
             Console.Error.WriteLine(
-                $"Command '{command}' does not produce the diagnostic-report schema required by --json -. " +
-                "Use check, report, system, sql, http, network, iis, eventlog, or plugin.");
+                $"Command '{command}' does not support --json -. " +
+                "Use check, report, report-diff, system, sql, http, network, iis, eventlog, or plugin.");
             return 2;
         }
 
@@ -56,6 +56,17 @@ internal static class ProgramEntry
                 leftConfigPath,
                 rightConfigPath,
                 ignorePrefixes,
+                cts.Token);
+        }
+
+        if (command.Equals("report-diff", StringComparison.OrdinalIgnoreCase))
+        {
+            return await RunReportDiffCommandAsync(
+                leftConfigPath,
+                rightConfigPath,
+                jsonOutput,
+                htmlOutput,
+                bundleOutput,
                 cts.Token);
         }
 
@@ -235,6 +246,70 @@ internal static class ProgramEntry
         }
     }
 
+    private static async Task<int> RunReportDiffCommandAsync(
+        string? leftPath,
+        string? rightPath,
+        string? jsonOutput,
+        string? htmlOutput,
+        string? bundleOutput,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(leftPath) ||
+            string.IsNullOrWhiteSpace(rightPath))
+        {
+            Console.Error.WriteLine("report-diff requires both --left <report.json> and --right <report.json>.");
+            return 2;
+        }
+
+        if (!string.IsNullOrWhiteSpace(htmlOutput) || !string.IsNullOrWhiteSpace(bundleOutput))
+        {
+            Console.Error.WriteLine("report-diff supports console output or --json <path|-> only; --html and --bundle are not supported.");
+            return 2;
+        }
+
+        try
+        {
+            var leftFullPath = Path.GetFullPath(leftPath);
+            var rightFullPath = Path.GetFullPath(rightPath);
+            var leftJson = await File.ReadAllTextAsync(leftFullPath, cancellationToken);
+            var rightJson = await File.ReadAllTextAsync(rightFullPath, cancellationToken);
+            var leftReport = DiagnosticJsonReportSerializer.Deserialize(leftJson);
+            var rightReport = DiagnosticJsonReportSerializer.Deserialize(rightJson);
+            var diff = DiagnosticReportDiffFactory.Create(leftReport, rightReport);
+            var jsonToStdout = string.Equals(jsonOutput, "-", StringComparison.Ordinal);
+
+            if (jsonToStdout)
+            {
+                Console.Out.WriteLine(DiagnosticReportDiffJsonSerializer.Serialize(diff));
+            }
+            else
+            {
+                ReportDiffConsoleReport.Write(diff, leftFullPath, rightFullPath);
+            }
+
+            if (!string.IsNullOrWhiteSpace(jsonOutput) && !jsonToStdout)
+            {
+                var json = DiagnosticReportDiffJsonSerializer.Serialize(diff, writeIndented: true);
+                var outputPath = await WriteTextFileAsync(jsonOutput, json, cancellationToken);
+                Console.WriteLine();
+                Console.WriteLine($"JSON diff: {outputPath}");
+            }
+
+            return diff.HasRegression ? 1 : 0;
+        }
+        catch (OperationCanceledException)
+        {
+            Console.Error.WriteLine("Report comparison cancelled.");
+            return 130;
+        }
+        catch (Exception ex) when (
+            ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException or NotSupportedException)
+        {
+            Console.Error.WriteLine($"Could not compare diagnostic reports: {ex.Message}");
+            return 2;
+        }
+    }
+
     private static async Task<int> RunGrowthAsync(
         ErpDoctorOptions options,
         string historyPath,
@@ -309,6 +384,7 @@ internal static class ProgramEntry
     private static bool SupportsJsonStdout(string command) =>
         command.Equals("check", StringComparison.OrdinalIgnoreCase) ||
         command.Equals("report", StringComparison.OrdinalIgnoreCase) ||
+        command.Equals("report-diff", StringComparison.OrdinalIgnoreCase) ||
         command.Equals("system", StringComparison.OrdinalIgnoreCase) ||
         command.Equals("sql", StringComparison.OrdinalIgnoreCase) ||
         command.Equals("http", StringComparison.OrdinalIgnoreCase) ||
@@ -379,6 +455,7 @@ internal static class ProgramEntry
             Usage:
               erp-doctor check [--config erp-doctor.json] [--json report.json| -] [--html report.html] [--bundle support.zip]
               erp-doctor report [--config erp-doctor.json] [--json report.json| -] [--html report.html]
+              erp-doctor report-diff --left before.json --right after.json [--json diff.json| -]
               erp-doctor bundle [--config erp-doctor.json] [--bundle support.zip]
               erp-doctor growth [--config erp-doctor.json] [--history erp-doctor-growth.json]
               erp-doctor config-diff --left appsettings.dev.json --right appsettings.prod.json [--ignore Logging,Serilog]
@@ -394,6 +471,7 @@ internal static class ProgramEntry
             Commands:
               check        Run every configured diagnostic and correlate likely causes.
               report       Run all checks and write a standalone HTML report by default.
+              report-diff  Compare two schema 1.0 DiagnosticReport JSON files and fail on regressions.
               bundle       Run all checks and write a sanitized ZIP support bundle by default.
               growth       Capture SQL database/table size and compare it with the previous local snapshot.
               config-diff  Compare two local JSON/appsettings files without printing secret values.
@@ -407,17 +485,24 @@ internal static class ProgramEntry
               plugin       Run only checks contributed by configured plugins.
 
             Output/state options:
-              --json <path>     Write the stable machine-readable report schema as indented JSON.
-              --json -          Write one compact diagnostic-report JSON document to stdout and suppress the human report.
-                                This mode is intended for CI, scripts, agents, and future MCP/integration wrappers.
+              --json <path>     Write machine-readable JSON. Diagnostics use DiagnosticReport schema 1.0;
+                                report-diff uses its own versioned diff schema.
+              --json -          Write one compact JSON document to stdout and suppress human console output.
               --html <path>     Write a standalone, dependency-free HTML diagnostic report.
               --bundle <path>   Write a sanitized ZIP with report.json, report.html, and manifest.json.
               --history <path>  Local JSON history used by the growth command.
 
             JSON stdout rules:
-              --json - supports check, report, system, sql, http, network, iis, eventlog, and plugin.
+              --json - supports check, report, report-diff, system, sql, http, network, iis, eventlog, and plugin.
               It cannot be combined with --html or --bundle so stdout remains exactly one JSON document.
-              Diagnostic/configuration errors are written to stderr; exit codes keep their normal meaning.
+              Diagnostic/configuration/compare errors are written to stderr; exit codes keep their normal meaning.
+
+            Report diff semantics:
+              --left <path>     Baseline/earlier DiagnosticReport JSON.
+              --right <path>    Candidate/later DiagnosticReport JSON.
+              Exit 1 means at least one regression was found; exit 0 means no regression; exit 2 is invalid input.
+              Worsened status, removed checks, newly added Warning/Critical/Error checks, and transitions to
+              Skipped count as regressions. Raw evidence/duration values are intentionally not diffed.
 
             Config drift options:
               --left <path>     Left JSON/appsettings file.
@@ -430,8 +515,8 @@ internal static class ProgramEntry
               plugins you trust. Raw plugin exception messages are suppressed by the host.
 
             Safety:
-              Built-in production diagnostics are read-only. Plugin behavior is owned by the plugin
-              author and is outside ERP Doctor's built-in read-only guarantee.
+              Built-in production diagnostics are read-only. report-diff/config-diff operate on local files only.
+              Plugin behavior is owned by the plugin author and is outside ERP Doctor's built-in read-only guarantee.
             """);
     }
 }
