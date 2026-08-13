@@ -1,0 +1,146 @@
+name: Report Diff Release Smoke
+
+on:
+  push:
+    branches:
+      - "agent/release-dry-run-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-self-contained-report-diff:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Publish self-contained Linux x64 CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet publish src/ErpDoctor.Cli/ErpDoctor.Cli.csproj \
+            --configuration Release \
+            --runtime linux-x64 \
+            --self-contained true \
+            --output artifacts/report-diff-linux-x64 \
+            -p:Version=0.20.0-dev.${GITHUB_RUN_NUMBER} \
+            -p:PublishSingleFile=true \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:DebugType=None \
+            -p:DebugSymbols=false
+
+      - name: Smoke test self-contained Linux report diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOOL="$GITHUB_WORKSPACE/artifacts/report-diff-linux-x64/ErpDoctor.Cli"
+          chmod +x "$TOOL"
+          "$TOOL" --help > /dev/null
+
+          cat > artifacts/report-before.json <<'JSON'
+          {
+            "schemaVersion": "1.0",
+            "generatedAtUtc": "2026-08-13T04:00:00+00:00",
+            "overallStatus": "healthy",
+            "healthScore": 100,
+            "summary": { "total": 2, "healthy": 2, "info": 0, "warning": 0, "critical": 0, "skipped": 0, "error": 0 },
+            "results": [
+              { "checkId": "system.cpu", "name": "System CPU", "status": "healthy", "summary": "CPU is healthy.", "evidence": {}, "suggestions": [] },
+              { "checkId": "system.memory", "name": "System memory", "status": "healthy", "summary": "Memory is healthy.", "evidence": {}, "suggestions": [] }
+            ],
+            "diagnoses": []
+          }
+          JSON
+
+          cat > artifacts/report-after.json <<'JSON'
+          {
+            "schemaVersion": "1.0",
+            "generatedAtUtc": "2026-08-13T04:05:00+00:00",
+            "overallStatus": "warning",
+            "healthScore": 80,
+            "summary": { "total": 2, "healthy": 1, "info": 0, "warning": 1, "critical": 0, "skipped": 0, "error": 0 },
+            "results": [
+              { "checkId": "system.cpu", "name": "System CPU", "status": "warning", "summary": "CPU pressure increased.", "evidence": {}, "suggestions": [] },
+              { "checkId": "system.memory", "name": "System memory", "status": "healthy", "summary": "Memory is healthy.", "evidence": {}, "suggestions": [] }
+            ],
+            "diagnoses": []
+          }
+          JSON
+
+          set +e
+          HUMAN_OUTPUT="$($TOOL report-diff \
+            --left artifacts/report-before.json \
+            --right artifacts/report-after.json 2>&1)"
+          HUMAN_EXIT=$?
+          set -e
+
+          if [[ "$HUMAN_EXIT" -ne 1 ]]; then
+            echo "$HUMAN_OUTPUT"
+            echo "Expected regression comparison to exit 1, got $HUMAN_EXIT."
+            exit 1
+          fi
+          grep -E "Regression gate[[:space:]]+FAIL" <<< "$HUMAN_OUTPUT"
+
+          set +e
+          DIFF_JSON="$($TOOL report-diff \
+            --left artifacts/report-before.json \
+            --right artifacts/report-after.json \
+            --json -)"
+          DIFF_EXIT=$?
+          set -e
+
+          if [[ "$DIFF_EXIT" -ne 1 ]]; then
+            echo "Expected JSON regression comparison to exit 1, got $DIFF_EXIT."
+            exit 1
+          fi
+          if [[ "$(printf '%s\n' "$DIFF_JSON" | wc -l)" -ne 1 ]]; then
+            echo "Expected one compact report-diff JSON stdout line."
+            exit 1
+          fi
+
+          DIFF_JSON="$DIFF_JSON" python3 - <<'PY'
+          import json
+          import os
+
+          diff = json.loads(os.environ["DIFF_JSON"])
+          assert diff["schemaVersion"] == "1.0"
+          assert diff["hasRegression"] is True
+          assert diff["regressionCount"] == 1
+          assert diff["healthScoreDelta"] == -20
+          cpu = next(change for change in diff["changes"] if change["checkId"] == "system.cpu")
+          assert cpu["kind"] == "regressed"
+          assert cpu["beforeStatus"] == "healthy"
+          assert cpu["afterStatus"] == "warning"
+          assert cpu["isRegression"] is True
+          PY
+
+          set +e
+          RECOVERY_JSON="$($TOOL report-diff \
+            --left artifacts/report-after.json \
+            --right artifacts/report-before.json \
+            --json -)"
+          RECOVERY_EXIT=$?
+          set -e
+
+          if [[ "$RECOVERY_EXIT" -ne 0 ]]; then
+            echo "Expected recovery comparison to exit 0, got $RECOVERY_EXIT."
+            exit 1
+          fi
+
+          RECOVERY_JSON="$RECOVERY_JSON" python3 - <<'PY'
+          import json
+          import os
+
+          diff = json.loads(os.environ["RECOVERY_JSON"])
+          assert diff["hasRegression"] is False
+          assert diff["regressionCount"] == 0
+          assert diff["healthScoreDelta"] == 20
+          PY
