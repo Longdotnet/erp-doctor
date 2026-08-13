@@ -42,6 +42,7 @@ ERP Doctor keeps those signals in one run so developers/support can reason about
 | Windows Event Log | Recent Critical/Error entries, optional Warning/provider filters |
 | Configuration | Secret-safe JSON/appsettings drift between environments |
 | Reporting | Console, stable file/stdout JSON, standalone HTML |
+| Deployment verification | Offline before/after `DiagnosticReport` regression diff with CI-friendly exit codes |
 | MCP | Optional read-only stdio server over the same versioned `DiagnosticReport` contract |
 | Support handoff | Sanitized ZIP bundle with JSON + HTML + manifest |
 | Plugin SDK | Explicit local DLL discovery and contributed diagnostic checks |
@@ -134,6 +135,7 @@ erp-doctor iis          IIS diagnostics only
 erp-doctor eventlog     Windows Event Log diagnostics only
 
 erp-doctor report       Generate standalone HTML
+erp-doctor report-diff  Compare two DiagnosticReport JSON files and fail on regressions
 erp-doctor bundle       Generate sanitized support ZIP
 erp-doctor growth       Capture/compare local SQL Server growth history
 erp-doctor config-diff  Compare JSON/appsettings safely
@@ -142,9 +144,47 @@ erp-doctor plugins      Discover configured plugins without running checks
 erp-doctor plugin       Run contributed plugin checks only
 ```
 
+## Diagnostic report regression diff (v0.20)
+
+Compare a baseline report with a later/candidate report without connecting to the ERP environment again:
+
+```bash
+erp-doctor report-diff \
+  --left before.json \
+  --right after.json
+```
+
+This is designed for **before/after deployment**, incident comparison, and CI regression gates. The command exits `1` when a valid comparison contains at least one regression, `0` when no regression is found, and `2` for invalid/unreadable/incompatible input.
+
+Machine-readable output uses its own versioned diff schema:
+
+```bash
+erp-doctor report-diff \
+  --left before.json \
+  --right after.json \
+  --json -
+```
+
+v0.20 compares stable `checkId + status` behavior and coverage, not volatile raw evidence/duration values. A worse status, removed check, transition to `Skipped`, or newly added Warning/Critical/Error check counts as a regression. Recovery from `Skipped` restores observability without pretending the underlying health necessarily improved.
+
+The output includes left/right health score, `healthScoreDelta`, per-kind counts, `regressionCount`, `hasRegression`, and each check's before/after status. Duplicate check IDs and unsupported report schema versions fail closed instead of being compared approximately.
+
+Typical deployment flow:
+
+```bash
+erp-doctor check --config erp-doctor.json --json before.json
+# deploy
+erp-doctor check --config erp-doctor.json --json after.json
+erp-doctor report-diff --left before.json --right after.json
+```
+
+`report-diff` is offline/read-only: it does not load ERP configuration, execute providers, connect to infrastructure, or modify the input reports.
+
+See [`docs/report-diff.md`](docs/report-diff.md).
+
 ## Read-only MCP stdio server (v0.19)
 
-ERP Doctor now has an optional MCP adapter that uses the **same built-in diagnostic catalog, runner, diagnosis engine, and `DiagnosticReport` schema** as the CLI.
+ERP Doctor has an optional MCP adapter that uses the **same built-in diagnostic catalog, runner, diagnosis engine, and `DiagnosticReport` schema** as the CLI.
 
 Start the server with a local operator-owned config:
 
@@ -194,7 +234,7 @@ Use `-` as the JSON destination when another program should consume ERP Doctor d
 erp-doctor check --config erp-doctor.json --json -
 ```
 
-This writes **one compact schema `1.0` JSON document to stdout** and suppresses the human console report. The same mode works with `report`, `system`, `sql`, `http`, `network`, `iis`, `eventlog`, and `plugin`.
+This writes **one compact schema `1.0` DiagnosticReport JSON document to stdout** and suppresses the human console report. The same DiagnosticReport mode works with `report`, `system`, `sql`, `http`, `network`, `iis`, `eventlog`, and `plugin`. `report-diff --json -` also uses deterministic JSON-only stdout, but returns the separate report-diff schema documented above.
 
 Linux example:
 
@@ -210,11 +250,11 @@ $report.schemaVersion
 $report.results
 ```
 
-The stdout/stderr boundary is intentional: report JSON stays on stdout, while usage/configuration failures go to stderr. Exit code `1` can still accompany a valid JSON document when diagnostics find a Critical/Error result.
+The stdout/stderr boundary is intentional: report JSON stays on stdout, while usage/configuration failures go to stderr. Exit code `1` can still accompany a valid JSON document when diagnostics find a Critical/Error result; for `report-diff`, exit `1` means a valid comparison found a regression.
 
 To keep stdout deterministic, `--json -` rejects combinations with `--html` or `--bundle` before running diagnostics or creating those artifacts.
 
-See [`docs/json-stdout.md`](docs/json-stdout.md) and [`docs/report-schema.md`](docs/report-schema.md).
+See [`docs/json-stdout.md`](docs/json-stdout.md), [`docs/report-schema.md`](docs/report-schema.md), and [`docs/report-diff.md`](docs/report-diff.md).
 
 ## System Doctor (v0.17)
 
@@ -317,9 +357,9 @@ erp-doctor report --config erp-doctor.json
 erp-doctor bundle --config erp-doctor.json
 ```
 
-The versioned `DiagnosticReport` is also available directly on stdout with `--json -` and as MCP structured content. Operational identifiers may remain in reports, so output/bundles should still be reviewed before sharing outside the organization.
+The versioned `DiagnosticReport` is also available directly on stdout with `--json -` and as MCP structured content. Operational identifiers may remain in reports/diffs/bundles, so output should still be reviewed before sharing outside the organization.
 
-See [`docs/report-schema.md`](docs/report-schema.md), [`docs/json-stdout.md`](docs/json-stdout.md), [`docs/mcp-server.md`](docs/mcp-server.md), and [`docs/support-bundle.md`](docs/support-bundle.md).
+See [`docs/report-schema.md`](docs/report-schema.md), [`docs/json-stdout.md`](docs/json-stdout.md), [`docs/report-diff.md`](docs/report-diff.md), [`docs/mcp-server.md`](docs/mcp-server.md), and [`docs/support-bundle.md`](docs/support-bundle.md).
 
 ## Provider plugins
 
@@ -415,18 +455,21 @@ Every release runs restore → build → test → package. Dry-runs additionally
 - standalone Linux `--help`,
 - standalone Linux Network Doctor DNS/TCP loopback behavior,
 - standalone Linux System Doctor CPU/load/process-pressure execution,
-- standalone Linux JSON stdout parsing/schema/no-human-output/conflict behavior,
+- standalone Linux DiagnosticReport JSON stdout parsing/schema/no-human-output/conflict behavior,
+- self-contained Linux `report-diff` regression/recovery exit codes and machine-readable diff schema,
 - official-client MCP handshake/tool discovery/call against the **published Linux MCP binary**,
 - standalone provider loading: PostgreSQL (4), Docker (3), Nginx (2), Redis (5), RabbitMQ (3),
 - CLI/MCP/provider archive creation,
 - SHA256 verification for platform/MCP/provider/NuGet/installer assets,
 - Linux installer installation/execution from the packaged CLI release.
 
-Windows CI separately validates the development MCP stdio handshake, packaged-tool JSON stdout, the PowerShell installer, invalid-checksum rejection, and valid archive installation/execution.
+Windows CI separately validates the development MCP stdio handshake, packaged-tool DiagnosticReport JSON stdout, packaged-tool `report-diff` regression/recovery behavior, the PowerShell installer, invalid-checksum rejection, and valid archive installation/execution.
+
+The v0.20 self-contained report-diff check is a companion dry-run workflow triggered by the same `agent/release-dry-run-*` branch used by the full Release workflow; both must pass before the feature is promoted.
 
 Branch/manual dry-runs cannot create a GitHub Release or publish NuGet; publishing is guarded to real tag pushes only.
 
-See [`docs/releasing.md`](docs/releasing.md).
+See [`docs/releasing.md`](docs/releasing.md) and [`docs/report-diff.md`](docs/report-diff.md).
 
 ## Architecture
 
@@ -453,8 +496,10 @@ See [`docs/releasing.md`](docs/releasing.md).
                              DiagnosisEngine
                                     |
                          DiagnosticReport (schema 1.0)
-                                    |
-       Console / JSON / HTML / Support Bundle / MCP structured content
+                           /                    \
+          Console / JSON / HTML / MCP      ReportDiff (schema 1.0)
+                     |                           |
+               Support Bundle              Console / JSON / CI gate
 ```
 
 ## Safety model
@@ -471,14 +516,15 @@ Current built-in/provider/installer/MCP behavior follows these principles:
 8. System pressure checks never terminate/suspend processes and never collect process command lines, environment variables, or memory contents.
 9. JSON stdout is serialization only: it opens no listener/server and grants no repair capability.
 10. MCP v0.19 is stdio-only, exposes one read-only diagnostic tool, and does not let a client choose config/plugin paths per request.
-11. PostgreSQL provider never terminates/cancels backends.
-12. Redis provider never reads keys/values or changes Redis state/topology.
-13. RabbitMQ provider is GET-only and never publishes/purges/deletes/requeues messages or mutates broker topology/accounts.
-14. Docker provider never changes container/engine state.
-15. Nginx provider never reloads/stops Nginx or dumps the full config.
-16. Permission/CLI/API failures become diagnostics instead of privilege escalation.
-17. Self-contained installers verify SHA256 before extraction; Windows does not clear custom destination directories and Linux does not modify shell startup files.
-18. Third-party plugins remain a separate executable-code trust boundary.
+11. Report diff v0.20 reads only operator-selected local report files, does not execute diagnostics/providers, and intentionally does not diff volatile raw evidence/duration values.
+12. PostgreSQL provider never terminates/cancels backends.
+13. Redis provider never reads keys/values or changes Redis state/topology.
+14. RabbitMQ provider is GET-only and never publishes/purges/deletes/requeues messages or mutates broker topology/accounts.
+15. Docker provider never changes container/engine state.
+16. Nginx provider never reloads/stops Nginx or dumps the full config.
+17. Permission/CLI/API failures become diagnostics instead of privilege escalation.
+18. Self-contained installers verify SHA256 before extraction; Windows does not clear custom destination directories and Linux does not modify shell startup files.
+19. Third-party plugins remain a separate executable-code trust boundary.
 
 ## Roadmap
 
@@ -503,6 +549,7 @@ Completed:
 - [x] v0.17 cross-platform CPU/load/process-pressure System Doctor
 - [x] v0.18 machine-readable DiagnosticReport JSON stdout transport
 - [x] v0.19 read-only MCP stdio server over the shared DiagnosticReport engine
+- [x] v0.20 offline DiagnosticReport regression diff + CI deployment gate
 
 Next:
 
