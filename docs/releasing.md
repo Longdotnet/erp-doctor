@@ -1,6 +1,6 @@
 # Releasing ERP Doctor
 
-ERP Doctor uses `.github/workflows/release.yml` for repeatable packaging and releases.
+ERP Doctor uses `.github/workflows/release.yml` for repeatable packaging and releases. v0.20 also adds `.github/workflows/report-diff-release-smoke.yml` as a focused Linux self-contained pre-release gate for the report regression feature.
 
 ## Outputs
 
@@ -33,13 +33,15 @@ PostgreSQL, Docker, Nginx, Redis, and RabbitMQ are separate provider bundles bec
 
 The Release workflow supports `workflow_dispatch` for manual packaging validation. Maintainer automation can also use a branch named `agent/release-dry-run-*`; branch dry runs package/upload artifacts but are explicitly prevented from creating a GitHub Release or publishing NuGet packages.
 
+For v0.20, the same `agent/release-dry-run-*` branch also triggers the focused **Report Diff Release Smoke** workflow. A v0.20 promotion therefore requires both the full Release dry run and the focused Linux report-diff gate to pass.
+
 Use a development SemVer such as:
 
 ```text
-0.19.0-dev.1
+0.20.0-dev.1
 ```
 
-A dry run:
+The full Release dry run:
 
 - restores, builds, and tests the full solution including `ErpDoctor.Mcp`,
 - packs the global tool and Plugin SDK,
@@ -49,7 +51,7 @@ A dry run:
 - runs the standalone Linux CLI,
 - verifies standalone Linux Network Doctor DNS/TCP behavior against a loopback listener,
 - verifies standalone Linux System Doctor CPU/load/process-pressure checks execute without runtime errors,
-- verifies standalone Linux `--json -` output is one parseable schema `1.0` document with no human console leakage,
+- verifies standalone Linux DiagnosticReport `--json -` output is one parseable schema `1.0` document with no human console leakage,
 - uses the official C# `McpClient` to start the **published self-contained Linux MCP binary**, complete the stdio handshake, list `run_diagnostics`, call it with `scope=system`, and verify structured schema `1.0` results,
 - verifies that the standalone CLI can discover all bundled provider DLLs with expected check counts,
 - packages CLI/MCP/provider archives plus `install.ps1` and `install.sh`,
@@ -59,22 +61,34 @@ A dry run:
 - does **not** create a GitHub Release,
 - does **not** publish to NuGet.org.
 
-Normal Windows CI additionally verifies the development MCP stdio server through the official C# `McpClient`, validates read-only tool annotations and bounded scope errors, installs the packed global CLI tool, parses JSON stdout, and runs checksum-verified installer gates.
+The v0.20 Report Diff Release Smoke additionally:
 
-This is the required validation path before creating a release tag.
+- publishes a fresh self-contained Linux x64 CLI from the same dry-run commit,
+- executes the published binary rather than the development assembly,
+- compares a deterministic healthy baseline against a warning candidate,
+- requires human output to report a failed regression gate and process exit code `1`,
+- requires `--json -` to return one compact report-diff schema `1.0` document,
+- verifies `hasRegression`, `regressionCount`, health-score delta, and per-check classification,
+- reverses the reports and requires the recovery comparison to exit `0` with no regression.
+
+Normal Windows CI additionally verifies the development MCP stdio server through the official C# `McpClient`, validates read-only tool annotations and bounded scope errors, installs the packed global CLI tool, parses DiagnosticReport JSON stdout, executes packaged `report-diff` regression/recovery cases, and runs checksum-verified installer gates.
+
+These are the required validation paths before creating a release tag.
 
 ## Real release
 
-A tag matching `v*.*.*` triggers the same pipeline and then creates a GitHub Release.
+A tag matching `v*.*.*` triggers the full release pipeline and then creates a GitHub Release.
 
-Example:
+Example after explicit maintainer approval:
 
 ```bash
-git tag v0.19.0
-git push origin v0.19.0
+git tag v0.20.0
+git push origin v0.20.0
 ```
 
 The release tag is the source of truth for published package versions. The workflow passes `-p:Version=<tag-version>` to build/pack/publish.
+
+The focused v0.20 report-diff workflow is primarily a pre-release dry-run guard. Before tagging, use the exact commit intended for release on an `agent/release-dry-run-*` branch and require both workflows to be green.
 
 ## Global tool package
 
@@ -96,6 +110,38 @@ When published to NuGet.org, users can install/update with:
 dotnet tool install --global ErpDoctor.Tool
 dotnet tool update --global ErpDoctor.Tool
 ```
+
+## Diagnostic report diff validation
+
+v0.20 adds:
+
+```bash
+erp-doctor report-diff --left before.json --right after.json
+```
+
+The deployment gate semantics are deliberate:
+
+```text
+exit 0  comparison succeeded, no regression
+exit 1  comparison succeeded, regression found
+exit 2  invalid/incompatible input
+```
+
+Windows CI validates the feature through the actually packed/installed global tool. The focused Linux release smoke validates the self-contained published executable.
+
+Both platforms require a Healthy -> Warning change for `system.cpu` to produce:
+
+```text
+kind: regressed
+hasRegression: true
+regressionCount: 1
+healthScoreDelta: -20
+exit: 1
+```
+
+Reversing the same two reports must produce no regression and exit `0`.
+
+The regression engine intentionally compares check status/coverage rather than volatile evidence or duration values. See [`report-diff.md`](report-diff.md).
 
 ## MCP server archives
 
@@ -166,7 +212,7 @@ and rejects an `Error` result for any of those checks. Warning/Critical is allow
 
 ## JSON stdout validation
 
-The self-contained Linux CLI must produce one compact parseable schema `1.0` document for:
+The self-contained Linux CLI must produce one compact parseable DiagnosticReport schema `1.0` document for:
 
 ```bash
 erp-doctor system --config artifacts/system-pressure-smoke.json --json -
@@ -174,7 +220,9 @@ erp-doctor system --config artifacts/system-pressure-smoke.json --json -
 
 The mixed-output guard must also reject `--json - --html` with usage exit code `2`, empty stdout, and no HTML artifact.
 
-See [`json-stdout.md`](json-stdout.md).
+`report-diff --json -` is also deterministic JSON-only stdout, but returns the separate versioned report-diff schema.
+
+See [`json-stdout.md`](json-stdout.md) and [`report-diff.md`](report-diff.md).
 
 ## MCP validation
 
@@ -245,15 +293,17 @@ Get-FileHash .\erp-doctor-mcp-win-x64.zip -Algorithm SHA256
 
 Before a real release:
 
-1. `main` CI is green, including MCP stdio, JSON stdout, and Windows installer validation.
-2. A Release dry run for the intended version is green.
-3. Self-contained CLI Windows/Linux publishes pass.
-4. Self-contained MCP Windows/Linux publishes pass.
-5. The official MCP client successfully handshakes/calls the published Linux MCP binary and receives structured schema `1.0` diagnostics.
-6. PostgreSQL, Docker, Nginx, Redis, and RabbitMQ provider archives are present and provider discovery counts match expectations.
-7. Network Doctor, System Doctor, and JSON stdout Linux smokes pass.
-8. CLI/MCP/provider/NuGet/installer assets all have entries in `checksums.txt`.
-9. Every checksum verifies.
-10. README/config/MCP/install examples contain no customer-specific secrets/data.
-11. Every bundled provider is intentionally included.
-12. Only then create/push the release tag.
+1. `main` CI is green, including MCP stdio, DiagnosticReport JSON stdout, packaged report-diff, and Windows installer validation.
+2. A full Release dry run from the exact intended commit is green.
+3. The v0.20 self-contained Linux Report Diff Release Smoke from that same commit is green.
+4. Self-contained CLI Windows/Linux publishes pass.
+5. Self-contained MCP Windows/Linux publishes pass.
+6. The official MCP client successfully handshakes/calls the published Linux MCP binary and receives structured schema `1.0` diagnostics.
+7. PostgreSQL, Docker, Nginx, Redis, and RabbitMQ provider archives are present and provider discovery counts match expectations.
+8. Network Doctor, System Doctor, and DiagnosticReport JSON stdout Linux smokes pass.
+9. Report-diff regression/recovery semantics pass on both the packaged Windows global tool and self-contained Linux binary.
+10. CLI/MCP/provider/NuGet/installer assets all have entries in `checksums.txt`.
+11. Every checksum verifies.
+12. README/config/MCP/install/report-diff examples contain no customer-specific secrets/data.
+13. Every bundled provider is intentionally included.
+14. Only then create/push the release tag.

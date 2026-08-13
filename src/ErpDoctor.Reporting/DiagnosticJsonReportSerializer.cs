@@ -12,6 +12,17 @@ public static class DiagnosticJsonReportSerializer
         return JsonSerializer.Serialize(report, CreateOptions(writeIndented));
     }
 
+    public static DiagnosticReport Deserialize(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            throw new JsonException("Diagnostic report JSON is empty.");
+        }
+
+        return JsonSerializer.Deserialize<DiagnosticReport>(json, CreateOptions(writeIndented: false))
+            ?? throw new JsonException("Diagnostic report JSON did not contain a report object.");
+    }
+
     private static JsonSerializerOptions CreateOptions(bool writeIndented)
     {
         var options = new JsonSerializerOptions
